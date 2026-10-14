@@ -1,0 +1,28 @@
+# 依赖与构建产物
+node_modules/
+dist/
+internal/web/dist/assets/
+web/public/icon-*.png
+web/public/apple-touch-icon.png
+web/public/favicon.ico
+
+# 预编译二进制（体积大，不入库）
+/fpkm
+/fpkm-linux
+/fpkm.exe
+/fpkm-1.0.1/
+*.fpk
+
+# 编辑器与系统文件
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# 附件/临时
+*.stale-*
+
+# 无关的本地目录（非本项目内容）
+/FnChat/
+/指尖nas-wizard/
+/semi-ui-skills.zip
