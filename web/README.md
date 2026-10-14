@@ -165,6 +165,71 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.63 桌面壁纸换成图片
+
+壁纸改为用户提供的科幻场景图（机甲 + 云海城市），放在
+`web/public/wallpaper.{webp,jpg}`，由 CSS `image-set` 让浏览器自行挑选：
+
+```css
+.fpkm-desktop {
+  background-color: #0b1220;              /* 图片未加载时也不露白底 */
+  background-image: image-set(
+    url('/wallpaper.webp') type('image/webp'),
+    url('/wallpaper.jpg')  type('image/jpeg')
+  );
+  background-size: cover;
+  background-position: center;
+}
+```
+
+**为什么同时放 WebP 与 JPEG**
+
+源图 2732×1535。缩到 2560 宽后：WebP 304KB，JPEG 556KB（WebP 小约 45%）。
+实测浏览器**只请求被选中的那一份**（当前环境只发出 1 个 `wallpaper.webp` 请求），
+因此保留 JPEG 只增加少量二进制体积，不增加访问流量，作为老浏览器兜底。
+
+**为什么加了暗色薄纱（scrim）**
+
+这张壁纸右侧偏亮，直接铺底会让白色图标文字糊在背景里。用独立的
+`::after` 伪元素叠加一层渐变暗纱（而不是把渐变写进 `background`，
+以免干扰 `image-set`）：
+
+```css
+.fpkm-desktop::after {
+  background:
+    linear-gradient(180deg, rgba(6,12,24,.42), rgba(6,12,24,.28) 45%, rgba(6,12,24,.5)),
+    radial-gradient(1200px 700px at 78% 8%, rgba(6,12,24,.28), transparent 65%);
+  z-index: 0;
+  pointer-events: none;
+}
+```
+
+**分层（踩过的坑）**
+
+`::after` 与桌面内容都是 `position:absolute` 且未设 `z-index` 时，
+按 **DOM 顺序**绘制 —— 伪元素排在子元素之后，会把图标和窗口整个盖住。
+因此显式分层：
+
+```
+背景图 → 网格 ::before (z0) → 暗纱 ::after (z0)
+      → .fpkm-desktop-area (z1) → 窗口 (z2+) → Dock (z9000)
+```
+
+实测 `elementFromPoint` 命中图标与 Dock 均正常（未被遮挡）。
+
+生成壁纸的命令（替换源图后重跑）：
+
+```bash
+python3 - <<'PY'
+from PIL import Image
+src = Image.open("源图.jpg").convert("RGB")
+w = 2560
+src = src.resize((w, round(src.height*w/src.width)), Image.LANCZOS)
+src.save("web/public/wallpaper.webp", "WEBP", quality=86, method=6)
+src.save("web/public/wallpaper.jpg",  "JPEG", quality=88, optimize=True, progressive=True)
+PY
+```
+
 ### 0.62 桌面修订（图标 / 商店加载 / Dock 分隔线 / 只显示运行中）
 
 **1. 应用图标换成带透明通道的新图标**

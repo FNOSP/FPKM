@@ -3,19 +3,40 @@
    壁纸 + 图标网格 + 可拖动子窗口 + 玻璃质感任务栏 + 右侧小组件
    ========================================================================== */
 
+/* 桌面壁纸。
+   图片由 /wallpaper.webp 提供（WebP 比同画质 JPEG 小约 45%），
+   JPEG 作为老浏览器兜底 —— 用 image-set 让浏览器自行挑选。
+   最下面一层是深色渐变：图片未加载出来时也不会露出白底。 */
 .fpkm-desktop {
   position: fixed;
   inset: 0;
   overflow: hidden;
-  /* 深空风格渐变壁纸：底层深蓝 → 上层青紫，模拟图片 1 的科幻氛围 */
-  background:
-    radial-gradient(1200px 700px at 78% 12%, rgba(94, 234, 212, 0.16), transparent 60%),
-    radial-gradient(900px 600px at 12% 88%, rgba(129, 140, 248, 0.18), transparent 62%),
-    radial-gradient(1400px 900px at 50% 120%, rgba(56, 189, 248, 0.12), transparent 60%),
-    linear-gradient(160deg, #0b1220 0%, #101a2e 42%, #0d1526 100%);
+  background-color: #0b1220;
+  background-image: image-set(
+    url('/wallpaper.webp') type('image/webp'),
+    url('/wallpaper.jpg') type('image/jpeg')
+  );
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
   color: #e6edf7;
   user-select: none;
   cursor: default;
+}
+
+/* 壁纸上叠加一层暗色薄纱（scrim）。
+   这张壁纸右侧偏亮，若不加压暗，白色图标文字会糊在背景里看不清；
+   同时稍微降低饱和度，避免背景比前景更抢眼。
+   用独立的伪元素而不是给 background 叠渐变，是为了不干扰 image-set。 */
+.fpkm-desktop::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(6, 12, 24, 0.42) 0%, rgba(6, 12, 24, 0.28) 45%, rgba(6, 12, 24, 0.5) 100%),
+    radial-gradient(1200px 700px at 78% 8%, rgba(6, 12, 24, 0.28), transparent 65%);
+  z-index: 0;
 }
 
 /* 壁纸上的细网格光效，增强"科技感"，同时不干扰图标可读性 */
@@ -29,15 +50,19 @@
   background-size: 48px 48px;
   mask-image: radial-gradient(circle at 50% 40%, #000 25%, transparent 78%);
   pointer-events: none;
+  z-index: 0;
 }
 
 /* ---------- 桌面区域 ---------- */
 
-/* 桌面可用区域：底部留给 Dock */
+/* 桌面可用区域：底部留给 Dock。
+   z-index 显式高于背景伪元素（网格/暗纱），否则后绘制的 ::after
+   会盖在图标与窗口之上（两者都是 z-index:0 时按 DOM 顺序绘制）。 */
 .fpkm-desktop-area {
   position: absolute;
   inset: 0 0 76px 0;
   overflow: hidden;
+  z-index: 1;
 }
 
 .fpkm-desktop-icons {
