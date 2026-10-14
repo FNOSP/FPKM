@@ -251,6 +251,15 @@ func (g *Gateway) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 通过鉴权的内容一律禁止浏览器缓存。
+	//
+	// 实测发现的真实缺陷：应用常返回 `Cache-Control: max-age=3600, public`，
+	// 浏览器会缓存整份响应，**登出后再访问根本不发请求**，
+	// 网关鉴权没有机会执行 —— 用户登出后仍能看到应用内容。
+	// 鉴权只在"每个请求都经过网关"时才有意义，因此这里统一压掉缓存。
+	// 放在此处（而非各代理内）可一次覆盖 HTTP / FastCGI / CGI 三条路径。
+	g.setNoCacheHeaders(w, r)
+
 	// CGI 路由：直接执行 CGI 二进制（不需要 socket 检查）
 	if matched.Protocol == "cgi" {
 		logger.Info("[GATEWAY] CGI 执行: %s (binary: %s)", r.URL.Path, matched.Socket)
@@ -350,6 +359,23 @@ func (g *Gateway) getProxy(route *Route) *httputil.ReverseProxy {
 	prefix := route.Prefix // 闭包捕获，避免 route 变化影响
 
 	proxy := &httputil.ReverseProxy{
+		// 删掉后端自带的缓存指令。
+		//
+		// 入口处已统一设置 no-store；ReverseProxy 用 Add 复制后端响应头，
+		// 若不一并删除，最终响应会同时带上
+		//   Cache-Control: no-store, ...
+		//   Cache-Control: max-age=3600, public
+		// 两条互相矛盾的指令（部分缓存实现只取其一，可能误判为可缓存）。
+		//
+		// 这里**只删缓存指令，保留 ETag / Last-Modified**：
+		// 后者用于断点续传与条件请求，删掉会影响大文件下载；
+		// 而 no-store 已足以让浏览器不保存副本。
+		ModifyResponse: func(resp *http.Response) error {
+			resp.Header.Del("Cache-Control")
+			resp.Header.Del("Pragma")
+			resp.Header.Del("Expires")
+			return nil
+		},
 		Director: func(req *http.Request) {
 			// 剥离网关前缀
 			// /app/frpc?action=status → /?action=status
@@ -864,6 +890,21 @@ func isLoopback(remoteAddr string) bool {
 	}
 	ip := net.ParseIP(strings.Trim(host, "[]"))
 	return ip != nil && ip.IsLoopback()
+}
+
+// setNoCacheHeaders 禁止浏览器缓存受保护内容。
+//
+// 实测缺陷：应用返回 `Cache-Control: max-age=3600, public` 时，浏览器会
+// 缓存整份响应，**登出后再访问不发请求**，网关鉴权无从执行，
+// 用户仍能看到已登出状态下的应用内容。鉴权只有"每个请求都经过网关"
+// 才有意义，因此对已鉴权内容统一压掉缓存。WebSocket 升级不涉及缓存，跳过。
+func (g *Gateway) setNoCacheHeaders(w http.ResponseWriter, r *http.Request) {
+	if isWebSocketRequest(r) {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, private")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 }
 
 // ---------- 登录校验 ----------

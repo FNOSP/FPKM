@@ -265,3 +265,37 @@ func TestLoginLinkFallsBackGracefully(t *testing.T) {
 		t.Errorf("未记录端口时应退回 \"/\"，实际 %q", got)
 	}
 }
+
+// TestAuthenticatedContentNotCacheable 已鉴权内容必须禁止浏览器缓存。
+//
+// 实测发现的真实缺陷：应用返回 `Cache-Control: max-age=3600, public` 时，
+// 浏览器会缓存整份响应，**登出后再访问根本不发请求**（实测状态码 200、
+// 内容仍是应用页面），网关鉴权没有机会执行。
+// 鉴权只有"每个请求都经过网关"才有意义，因此必须压掉缓存头。
+func TestAuthenticatedContentNotCacheable(t *testing.T) {
+	dir := t.TempDir()
+	g := &Gateway{cfg: &config.Config{BaseDir: dir}, routes: map[string]*Route{}, gate: true}
+
+	if !g.gate {
+		t.Skip("门禁未启用")
+	}
+
+	// 直接验证网关在入口设置的头
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://nas/app/demo/", nil)
+	g.setNoCacheHeaders(rec, req)
+
+	cc := rec.Header().Get("Cache-Control")
+	if !contains(cc, "no-store") {
+		t.Errorf("Cache-Control 应含 no-store，实际 %q", cc)
+	}
+	if contains(cc, "max-age=3600") {
+		t.Error("不应保留后端的 max-age")
+	}
+	if pragma := rec.Header().Get("Pragma"); pragma != "no-cache" {
+		t.Errorf("Pragma = %q, 期望 no-cache", pragma)
+	}
+	if exp := rec.Header().Get("Expires"); exp != "0" {
+		t.Errorf("Expires = %q, 期望 0", exp)
+	}
+}

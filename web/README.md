@@ -259,6 +259,37 @@ CGI 尤其重要：它会产生副作用，未登录绝不能执行。
 > 注意：退出入口目前在**商店界面**（桌面 → 打开应用商店窗口 → 右上角退出）。
 > 桌面任务栏本身尚无退出按钮。
 
+#### 修复：登出后仍能看到应用内容（浏览器缓存绕过鉴权）
+
+**这是实测发现的第二个独立缺陷**，与"网关跑旧二进制"无关，重启也修不掉。
+
+应用常返回 `Cache-Control: max-age=3600, public`，浏览器会把整份响应存进
+HTTP 缓存。**登出后再访问时浏览器根本不发请求**，于是网关的鉴权逻辑
+没有机会执行：
+
+```
+登出前：HTTP 200  "CACHED-APP-CONTENT"
+登出后：HTTP 200  "CACHED-APP-CONTENT"   ← 命中缓存，绕过了网关
+        cache-control: max-age=3600, public
+```
+
+鉴权只有在"**每个请求都经过网关**"时才有意义。修复方式是在网关入口
+对已鉴权内容统一压掉缓存：
+
+```go
+func (g *Gateway) setNoCacheHeaders(w http.ResponseWriter, r *http.Request) {
+    if isWebSocketRequest(r) { return }   // 升级请求不涉及缓存
+    w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, private")
+    w.Header().Set("Pragma", "no-cache")
+    w.Header().Set("Expires", "0")
+}
+```
+
+放在入口处（而非各代理实现内）可一次覆盖 HTTP / FastCGI / CGI 三条路径；
+HTTP 反向代理另外用 `ModifyResponse` 覆盖后端自带的 `ETag` / `Last-Modified`。
+
+修复后实测：登出再访问得到 **401**，`cache-control: no-store`。
+
 #### 修复：登录引导页的链接指向错误端口
 
 网关与 Web 是**不同端口**的两个进程（实测部署为 gateway=7666、web=7667）。
