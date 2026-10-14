@@ -60,6 +60,19 @@ type Gateway struct {
 	sessions *session.Store
 	// gate 是否启用登录校验（关掉时行为与升级前一致）
 	gate bool
+	// embedded 表示网关与 Web 共用同一端口（通过 Mount 挂载）。
+	// 此时登录链接直接用同源根路径，无需再查 web.port 文件。
+	embedded bool
+}
+
+// NewEmbedded 创建与 Web **共用同一端口**的网关实例。
+//
+// 与 New 的区别：登录引导页的链接使用同源根路径（"/"），
+// 因为此时 Web 界面与网关同端口，不存在跨端口跳转问题。
+func NewEmbedded(cfg *config.Config) *Gateway {
+	g := New(cfg, cfg.GatewayPort)
+	g.embedded = true
+	return g
 }
 
 // New 创建网关实例。
@@ -214,15 +227,12 @@ func (g *Gateway) Stop() error {
 	return nil
 }
 
-// handleRequest 主请求处理器：根据路径前缀转发到 Unix Socket
-func (g *Gateway) handleRequest(w http.ResponseWriter, r *http.Request) {
-	start := time.Now()
-	logger.Info("[GATEWAY] --> %s %s (from %s)", r.Method, r.URL.Path, r.RemoteAddr)
-
+// matchRoute 按最长前缀匹配查找路由，未命中返回 nil
+func (g *Gateway) matchRoute(path string) *Route {
 	g.mu.RLock()
-	// 找到匹配的路由（最长前缀匹配）
+	defer g.mu.RUnlock()
+
 	var matched *Route
-	path := r.URL.Path
 	for prefix, route := range g.routes {
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			if matched == nil || len(prefix) > len(matched.Prefix) {
@@ -230,14 +240,70 @@ func (g *Gateway) handleRequest(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	g.mu.RUnlock()
+	return matched
+}
 
+// Mount 把网关挂载到另一个 HTTP 服务上（Web 与网关共用同一端口）。
+//
+// 行为：
+//   - /__gateway__/* 管理接口 → 仅本机可访问；
+//   - 命中已注册的应用路由 → 走网关（含登录校验与代理）；
+//   - 其余路径 → 交给 fallback（通常是前端 SPA 处理器）。
+//
+// 这样 Web 界面与 /app/* 应用代理同端口（7666），
+// 不再需要另起一个网关进程，登录页链接、Cookie、iframe 都变成同源。
+func (g *Gateway) Mount(fallback http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/__gateway__/routes":
+			localOnly(g.handleRoutesAPI)(w, r)
+			return
+		case "/__gateway__/status":
+			localOnly(g.handleStatus)(w, r)
+			return
+		}
+
+		// 只拦截有应用路由前缀的路径，其余交给前台。
+		// 这里必须显式判断：Mounted 模式下 fallback 就是 SPA，
+		// 若把未命中的请求也交给 handleRequest，会得到网关的 404 而不是前端页面。
+		if matched := g.matchRoute(r.URL.Path); matched != nil {
+			g.serve(w, r, matched)
+			return
+		}
+
+		// 未注册的 /app/* 明确返回 404，而不是回退到前端 SPA。
+		// 否则在 iframe 里打开未启动的应用会显示整个桌面，令人困惑。
+		if strings.HasPrefix(r.URL.Path, "/app/") {
+			logger.Info("[GATEWAY] <-- %s 404 (未注册的应用路由)", r.URL.Path)
+			http.Error(w, "未找到匹配的应用路由: "+r.URL.Path+
+				"\n（应用可能未启动，或尚未注册到网关）", http.StatusNotFound)
+			return
+		}
+
+		if fallback != nil {
+			fallback.ServeHTTP(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+}
+
+// handleRequest 主请求处理器：根据路径前缀转发到 Unix Socket
+// （独立端口运行时使用；共用端口时走 Mount）
+func (g *Gateway) handleRequest(w http.ResponseWriter, r *http.Request) {
+	matched := g.matchRoute(r.URL.Path)
 	if matched == nil {
-		logger.Info("[GATEWAY] <-- %s 404 (无匹配路由, %.1fms)", r.URL.Path, float64(time.Since(start).Microseconds())/1000)
-		http.Error(w, "未找到匹配的应用路由: "+path, http.StatusNotFound)
+		logger.Info("[GATEWAY] <-- %s 404 (无匹配路由)", r.URL.Path)
+		http.Error(w, "未找到匹配的应用路由: "+r.URL.Path, http.StatusNotFound)
 		return
 	}
+	g.serve(w, r, matched)
+}
 
+// serve 处理一个已匹配到路由的请求
+func (g *Gateway) serve(w http.ResponseWriter, r *http.Request, matched *Route) {
+	start := time.Now()
+	logger.Info("[GATEWAY] --> %s %s (from %s)", r.Method, r.URL.Path, r.RemoteAddr)
 	logger.Info("[GATEWAY] 匹配路由: %s -> %s (socket: %s, protocol: %s)", matched.Prefix, matched.AppName, matched.Socket, matched.Protocol)
 
 	// 登录校验（与飞牛一致：网关 / CGI 应用必须登录后才能访问）。
@@ -969,6 +1035,11 @@ func (g *Gateway) writeLoginRequired(w http.ResponseWriter, r *http.Request) {
 // 因此不能简单用 "/" —— 那会落到网关根路径并返回 404。
 // Web 进程会把实际监听端口写入 web.port，这里读取后拼出完整地址。
 func (g *Gateway) loginURL(r *http.Request) string {
+	// 与 Web 同端口时，登录页就在同源根路径
+	if g.embedded {
+		return "/"
+	}
+
 	port := 0
 	if data, err := os.ReadFile(g.cfg.WebPortFile()); err == nil {
 		if p, perr := strconv.Atoi(strings.TrimSpace(string(data))); perr == nil {
@@ -1215,6 +1286,9 @@ func (g *Gateway) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"port":    g.port,
 		"pid":     os.Getpid(),
 		"routes":  len(g.GetRoutes()),
+		// embedded=true 表示网关已并入 Web 进程（同端口）。
+		// 此时不应再单独 stop/start 网关 —— 它随 Web 一起生命周期。
+		"embedded": g.embedded,
 	}
 	json.NewEncoder(w).Encode(status)
 }

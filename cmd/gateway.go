@@ -111,8 +111,26 @@ func startGateway(cfg *config.Config) {
 }
 
 // stopGateway 停止网关
+// gatewayEmbedded 探测当前网关是否已并入 Web 进程（同端口）
+func gatewayEmbedded(cfg *config.Config) bool {
+	client := gateway.NewClient(cfg)
+	st, err := client.GetStatus()
+	if err != nil {
+		return false
+	}
+	embedded, _ := st["embedded"].(bool)
+	return embedded
+}
+
 func stopGateway(cfg *config.Config) {
 	client := gateway.NewClient(cfg)
+
+	// 网关已并入 Web 进程时，杀掉这个 PID 会连带停掉整个 Web 界面，
+	// 因此只提示，不执行 kill。
+	if gatewayEmbedded(cfg) {
+		logger.Info("统一网关已并入 Web 服务（同端口），请用 Ctrl+C 或停止 Web 服务来关闭")
+		return
+	}
 
 	pidFile := cfg.GatewayPidFile()
 	data, err := os.ReadFile(pidFile)

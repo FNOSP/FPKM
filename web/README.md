@@ -165,6 +165,69 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.65 统一端口：Web 界面与网关共用 7666
+
+此前是两个进程、两个端口：
+
+```
+:7667 → fpkm web      （UI + /api/*）
+:7666 → fpkm gateway  （/app/* 转发 + /__gateway__/* 注册接口）
+```
+
+现在合并为**一个进程、一个端口**（默认 7666）。
+
+#### 实现方式：把网关挂到 Web 的 Handler 上
+
+网关新增 `Mount(fallback)`，Web 的 `/` 路由改为：
+
+```
+/__gateway__/*           → 网关管理接口（仅本机）
+/app/*（已注册路由）      → 网关代理（含登录校验、禁止缓存）
+/app/*（未注册）          → 404，明确提示"未注册/未启动"
+其余路径                  → 前端 SPA
+```
+
+要点：
+
+- **未注册的 `/app/*` 不回落到 SPA** —— 否则在 iframe 里打开未启动的应用
+  会显示整个桌面，令人困惑；
+- `NewEmbedded()` 让登录引导页直接用同源 `href="/"`，
+  不再需要跨端口拼地址（`web.port` 机制仅保留给独立网关模式）；
+- `X-Frame-Options: SAMEORIGIN` 现在**不再妨碍** iframe：
+  桌面与 `/app/*` 同源。
+
+#### 关键一致性：cfg.GatewayPort 必须等于实际监听端口
+
+`app.Manager` 注册路由的方式是「HTTP POST 到 `127.0.0.1:cfg.GatewayPort`」，
+`describeAccess` 也用它生成应用访问地址。因此启动时：
+
+```go
+if webPort > 0 { cfg.GatewayPort = webPort }   // 与监听端口对齐
+// --port 0 时在 Listen 成功后回写真实端口
+cfg.GatewayPort = tcpAddr.Port
+```
+
+否则用 `--port 8000` 启动会让注册请求打到错误端口，
+应用启动后 `/app/*` 无法访问。
+
+#### 启动时注册已有应用
+
+网关不再独立扫描应用目录（它已并入本进程），
+因此 `fpkm web` 启动时会扫描一次已安装应用并注册 socket/CGI 路由，
+否则重启后已安装应用的 `/app/*` 会 404。
+
+#### 升级注意
+
+端口被占用时给出可操作的提示（旧版独立网关可能仍占着 7666）：
+
+```
+fpkm gateway --stop      # 停止旧网关
+fpkm web --bind 0.0.0.0 --port 7666
+```
+
+`fpkm gateway --status` 会返回 `embedded: true`，
+此时 `gateway --stop` 只提示不执行 —— 杀掉该 PID 会连带停掉 Web 界面。
+
 ### 0.64 统一网关 / CGI 应用需要登录 FPKM 才能访问
 
 与飞牛保持一致：统一网关与 CGI 应用**必须登录后才能访问**。

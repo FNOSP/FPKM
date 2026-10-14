@@ -7,9 +7,11 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
+	"fpkm/internal/app"
 	"fpkm/internal/config"
 	"fpkm/internal/logger"
 	"fpkm/internal/web"
@@ -51,7 +53,7 @@ var webCmd = &cobra.Command{
   默认监听 127.0.0.1；如需局域网访问，请使用 --bind 0.0.0.0。
 
   fpkm web                                  # 本机访问
-  fpkm web --bind 0.0.0.0 --port 7667       # 局域网访问
+  fpkm web --bind 0.0.0.0 --port 7666       # 局域网访问
   fpkm web --reset-password                 # 重置管理密码`,
 	Run: func(cmd *cobra.Command, args []string) {
 		cfg := config.GetConfig()
@@ -62,7 +64,7 @@ var webCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(webCmd)
 	webCmd.Flags().StringVar(&webBind, "bind", "127.0.0.1", "监听地址（0.0.0.0 表示允许局域网访问）")
-	webCmd.Flags().IntVar(&webPort, "port", 7667, "监听端口")
+	webCmd.Flags().IntVar(&webPort, "port", 7666, "监听端口（与统一网关共用同一端口）")
 	webCmd.Flags().BoolVar(&webResetPassword, "reset-password", false, "清除已设置的管理密码（忘记密码时使用，下次打开页面可重新设置）")
 	webCmd.Flags().BoolVar(&webAllowFS, "allow-fs", true, "允许浏览服务器文件系统以选择本地安装包")
 	webCmd.Flags().BoolVar(&webOpenAddr, "show-address", true, "启动后打印可访问地址")
@@ -95,6 +97,16 @@ func runWebServer(cfg *config.Config) {
 		PublicScheme: webPublicScheme,
 	}
 
+	// 关键：让 cfg.GatewayPort 与实际监听端口保持一致。
+	//
+	// app.Manager 注册应用路由的方式是「HTTP POST 到 127.0.0.1:cfg.GatewayPort」，
+	// 而网关现已并入本进程。若两者不一致（例如 --port 8000），
+	// 注册请求会打到错误的端口，应用启动后 /app/* 无法访问。
+	// 同时 describeAccess 也用它生成访问地址，必须同源。
+	if webPort > 0 {
+		cfg.GatewayPort = webPort
+	}
+
 	srv := web.NewServer(cfg, opts)
 	addr := net.JoinHostPort(webBind, strconv.Itoa(webPort))
 
@@ -108,17 +120,36 @@ func runWebServer(cfg *config.Config) {
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
+		// 最常见的失败原因是"旧的独立网关仍占着同一端口"：
+		// Web 与网关现已统一端口，升级后必须先停掉旧网关进程。
+		if strings.Contains(err.Error(), "address already in use") {
+			logger.Fatal("监听 %s 失败：端口已被占用。\n"+
+				"  网关与 Web 现已统一到同一端口；若旧版独立网关仍在运行，请先停止：\n"+
+				"    fpkm gateway --stop      # 停止旧网关\n"+
+				"    fpkm web --bind 0.0.0.0 --port %d\n"+
+				"  或用其它端口启动: fpkm web --port 8000（应用地址会自动跟随）",
+				addr, webPort)
+		}
 		logger.Fatal("监听 %s 失败: %v", addr, err)
 	}
 
-	// 记录实际监听端口，供网关生成"前往登录"链接使用
-	// （端口可能配为 0 由系统分配，因此取监听成功后的真实值）
+	// 记录实际监听端口。
+	//
+	// --port 0 时由系统分配，因此要在监听成功后取真实值，
+	// 并回写 cfg.GatewayPort：Manager 注册应用路由时要用它。
 	if tcpAddr, ok := ln.Addr().(*net.TCPAddr); ok {
+		cfg.GatewayPort = tcpAddr.Port
 		if werr := os.WriteFile(cfg.WebPortFile(),
 			[]byte(strconv.Itoa(tcpAddr.Port)), 0o644); werr != nil {
 			logger.Warn("写入 Web 端口记录失败（不影响运行）: %v", werr)
 		}
 	}
+
+	// 扫描已安装应用并注册路由到内嵌网关。
+	//
+	// 网关与 Web 现在同一个进程、同一个端口：应用路由必须在这里注册，
+	// 否则重启后已安装的应用（socket/CGI）不会被代理，/app/* 会 404。
+	registerExistingRoutes(srv)
 
 	logger.Success("FPKM 应用商店已启动")
 	logger.Info("  监听地址: %s", addr)
@@ -162,5 +193,55 @@ func runWebServer(cfg *config.Config) {
 			logger.Warn("关闭超时: %v", err)
 		}
 		logger.Success("Web 服务已停止")
+	}
+}
+
+// registerExistingRoutes 把已安装应用的网关路由注册到内嵌网关。
+//
+// 与独立的 `fpkm gateway --run` 不同：网关不再单独扫描（它已并入本进程），
+// 因此启动时必须主动扫描一次，否则重启后已安装应用的 /app/* 会 404。
+//
+// 判定依据与 cmd/gateway.go 的扫描保持一致：以应用 .env 中的
+// GATEWAY_PREFIX / SOCKET_PATH / CGI_PATH 为准。
+func registerExistingRoutes(srv *web.Server) {
+	gw := srv.Gateway()
+	if gw == nil {
+		return
+	}
+
+	cfg := config.GetConfig()
+	mgr := app.NewManager(cfg)
+	infos, err := mgr.List()
+	if err != nil {
+		logger.Warn("扫描已安装应用失败，应用路由未注册: %v", err)
+		return
+	}
+
+	registered := 0
+	for _, info := range infos {
+		env, err := app.LoadEnvFile(cfg.AppEnvFile(info.Name))
+		if err != nil || env == nil {
+			continue
+		}
+		prefix := env["GATEWAY_PREFIX"]
+		if prefix == "" {
+			continue
+		}
+
+		switch {
+		case env["CGI_PATH"] != "":
+			gw.AddRouteCGI(info.Name, prefix, env["CGI_PATH"])
+			registered++
+		case env["SOCKET_PATH"] != "":
+			// 只注册 socket 已存在的应用：未运行的应用注册了也没用，
+			// 反而会让 /app/* 返回"Socket 不存在"而不是前端页面。
+			if _, err := os.Stat(env["SOCKET_PATH"]); err == nil {
+				gw.AddRoute(info.Name, prefix, env["SOCKET_PATH"])
+				registered++
+			}
+		}
+	}
+	if registered > 0 {
+		logger.Info("已注册 %d 个应用路由到统一网关", registered)
 	}
 }

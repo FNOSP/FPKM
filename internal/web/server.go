@@ -15,6 +15,7 @@ import (
 
 	"fpkm/internal/app"
 	"fpkm/internal/config"
+	"fpkm/internal/gateway"
 	"fpkm/internal/logger"
 	"fpkm/internal/session"
 )
@@ -48,6 +49,9 @@ type Server struct {
 	// sessions 跨进程共享的会话存储。网关进程也读同一份密钥，
 	// 因此统一网关 / CGI 应用能独立校验 FPKM 的登录态。
 	sessions *session.Store
+	// gw 统一网关（与 Web 共用同一端口）。
+	// 挂载后 /app/* 由它代理，其余路径交给前端 SPA。
+	gw *gateway.Gateway
 }
 
 // NewServer 创建 Web 服务
@@ -69,7 +73,13 @@ func NewServer(cfg *config.Config, opts Options) *Server {
 		catalog:   NewCatalog(NewSourceStore(cfg)),
 		icons:     newIconCache(cfg),
 		sessions:  sessions,
+		gw:        gateway.NewEmbedded(cfg),
 	}
+}
+
+// Gateway 返回内嵌的统一网关，供启动时扫描并注册应用路由
+func (s *Server) Gateway() *gateway.Gateway {
+	return s.gw
 }
 
 // Handler 构建 HTTP 路由
@@ -104,8 +114,16 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/api/system/stats", s.handleSystemStats)     // GET 系统状态（桌面小组件）
 	mux.Handle("/api/", s.withAuth(api))
 
-	// 前端静态资源（SPA）
-	mux.Handle("/", s.spaHandler())
+	// 前端静态资源（SPA）。
+	//
+	// 统一网关与 Web 共用同一端口：命中已注册应用路由（/app/* 等）的请求
+	// 由网关处理（含登录校验与代理），其余交给前端 SPA。
+	// 这样 Web 界面与 /app/* 同源，Cookie、登录跳转、iframe 都不再跨端口。
+	var front http.Handler = s.spaHandler()
+	if s.gw != nil {
+		front = s.gw.Mount(front)
+	}
+	mux.Handle("/", front)
 
 	return s.withSecurityHeaders(mux)
 }

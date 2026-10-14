@@ -68,7 +68,7 @@ export function kindLabel(kind: string): string {
  * 按"当前页面的主机名"拼出应用访问地址。
  *
  * 界面可能通过 127.0.0.1、局域网 IP 或域名访问，因此不能用 localhost：
- * 从另一台电脑打开 http://nas:7667 时，localhost 指的是那台电脑自己。
+ * 从另一台电脑打开 http://nas:7666 时，localhost 指的是那台电脑自己。
  * 这里复用浏览器地址栏的协议与主机名，只替换端口与路径。
  *
  * 若服务端通过 --public-host 显式指定了对外主机名/协议（反向代理场景），

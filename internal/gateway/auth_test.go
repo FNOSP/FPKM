@@ -299,3 +299,116 @@ func TestAuthenticatedContentNotCacheable(t *testing.T) {
 		t.Errorf("Expires = %q, 期望 0", exp)
 	}
 }
+
+// TestMountServesAppRoutes 同端口挂载：命中应用路由时走网关
+func TestMountServesAppRoutes(t *testing.T) {
+	g, st := newTestGateway(t)
+	g.embedded = true
+
+	// 注册一个指向不存在 socket 的路由：
+	// 只要不返回 404「未找到匹配的应用路由」，就说明命中了网关
+	g.AddRoute("demo", "/app/demo", "/nonexistent/app.sock")
+
+	h := g.Mount(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("SPA-FALLBACK"))
+	}))
+
+	// 无令牌 → 应被网关拦下（401），而不是回落到 SPA
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://nas/app/demo/", nil)
+	req.Header.Set("Accept", "text/html")
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("无令牌访问 /app/demo 应为 401，实际 %d", rec.Code)
+	}
+	if contains(rec.Body.String(), "SPA-FALLBACK") {
+		t.Error("/app/* 不应回落到前端 SPA")
+	}
+
+	// 带有效令牌 → 通过鉴权，进入代理阶段（socket 不存在 → 502）
+	tok, _, _ := st.Issue()
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "http://nas/app/demo/", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
+	h.ServeHTTP(rec, req)
+	if rec.Code == http.StatusUnauthorized {
+		t.Error("有效令牌不应被拒绝")
+	}
+	if contains(rec.Body.String(), "SPA-FALLBACK") {
+		t.Error("有令牌时应进入网关代理，而非 SPA")
+	}
+}
+
+// TestMountFallsBackToSPA 非 /app/* 路径交给前端
+func TestMountFallsBackToSPA(t *testing.T) {
+	g, _ := newTestGateway(t)
+	g.embedded = true
+	h := g.Mount(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("SPA-FALLBACK:" + r.URL.Path))
+	}))
+
+	for _, p := range []string{"/", "/index.html", "/assets/x.js", "/api/apps"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://nas"+p, nil))
+		if rec.Code != http.StatusOK || !contains(rec.Body.String(), "SPA-FALLBACK") {
+			t.Errorf("%s 应回落到 SPA，实际 code=%d body=%q", p, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// TestMountUnregisteredAppPath404 未注册的 /app/* 应 404 而不是渲染 SPA
+func TestMountUnregisteredAppPath404(t *testing.T) {
+	g, _ := newTestGateway(t)
+	g.embedded = true
+	h := g.Mount(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("SPA-FALLBACK"))
+	}))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://nas/app/notstarted/", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("未注册的 /app/* 应为 404，实际 %d", rec.Code)
+	}
+	if contains(rec.Body.String(), "SPA-FALLBACK") {
+		t.Error("未注册的 /app/* 不应回落到 SPA（否则 iframe 里会显示整个桌面）")
+	}
+}
+
+// TestMountAdminEndpointsLocalOnly 挂载模式下管理接口仍仅限本机
+func TestMountAdminEndpointsLocalOnly(t *testing.T) {
+	g, _ := newTestGateway(t)
+	g.embedded = true
+	h := g.Mount(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("SPA-FALLBACK"))
+	}))
+
+	// 局域网来源
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://nas/__gateway__/routes", nil)
+	req.RemoteAddr = "192.168.1.50:12345"
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("管理接口对局域网应为 403，实际 %d", rec.Code)
+	}
+
+	// 本机
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "http://nas/__gateway__/routes", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("管理接口对本机应为 200，实际 %d", rec.Code)
+	}
+}
+
+// TestEmbeddedLoginLinkIsSameOrigin 同端口模式下登录链接用同源根路径
+func TestEmbeddedLoginLinkIsSameOrigin(t *testing.T) {
+	dir := t.TempDir()
+	g := &Gateway{cfg: &config.Config{BaseDir: dir}, routes: map[string]*Route{}, embedded: true}
+	req := httptest.NewRequest(http.MethodGet, "http://nas:7666/app/demo/", nil)
+	if got := g.loginURL(req); got != "/" {
+		t.Errorf("同端口模式登录链接应为 \"/\"，实际 %q", got)
+	}
+}
