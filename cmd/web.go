@@ -111,6 +111,15 @@ func runWebServer(cfg *config.Config) {
 		logger.Fatal("监听 %s 失败: %v", addr, err)
 	}
 
+	// 记录实际监听端口，供网关生成"前往登录"链接使用
+	// （端口可能配为 0 由系统分配，因此取监听成功后的真实值）
+	if tcpAddr, ok := ln.Addr().(*net.TCPAddr); ok {
+		if werr := os.WriteFile(cfg.WebPortFile(),
+			[]byte(strconv.Itoa(tcpAddr.Port)), 0o644); werr != nil {
+			logger.Warn("写入 Web 端口记录失败（不影响运行）: %v", werr)
+		}
+	}
+
 	logger.Success("FPKM 应用商店已启动")
 	logger.Info("  监听地址: %s", addr)
 	if webOpenAddr {

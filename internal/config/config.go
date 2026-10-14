@@ -131,6 +131,15 @@ func (c *Config) GatewayLogFile() string {
 	return filepath.Join(c.LogDir, "gateway.log")
 }
 
+// WebPortFile 记录 Web 界面实际监听的端口。
+//
+// 网关与 Web 是两个进程、且**端口不同**（如 web=7667、gateway=7666）。
+// 未登录时网关要给出"前往登录"的链接，就必须知道 Web 界面在哪，
+// 因此由 Web 进程在监听成功后把真实端口写到这里，网关读取。
+func (c *Config) WebPortFile() string {
+	return filepath.Join(c.BaseDir, "web.port")
+}
+
 // AppSocketPath 返回应用的 Unix Socket 路径
 // socket 文件放在 target/ 目录下（与飞牛一致）
 func (c *Config) AppSocketPath(appname, socketName string) string {

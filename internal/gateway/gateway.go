@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -918,7 +919,49 @@ func (g *Gateway) writeLoginRequired(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusUnauthorized)
-	_, _ = io.WriteString(w, loginRequiredPage)
+	_, _ = io.WriteString(w, g.loginRequiredHTML(r))
+}
+
+// loginURL 推导 FPKM Web 界面的登录地址。
+//
+// 网关与 Web 是**不同端口**的两个进程（例如 gateway=7666、web=7667），
+// 因此不能简单用 "/" —— 那会落到网关根路径并返回 404。
+// Web 进程会把实际监听端口写入 web.port，这里读取后拼出完整地址。
+func (g *Gateway) loginURL(r *http.Request) string {
+	port := 0
+	if data, err := os.ReadFile(g.cfg.WebPortFile()); err == nil {
+		if p, perr := strconv.Atoi(strings.TrimSpace(string(data))); perr == nil {
+			port = p
+		}
+	}
+
+	host := r.Host
+	if i := strings.LastIndex(host, ":"); i > 0 {
+		host = host[:i]
+	}
+	if host == "" {
+		host = "localhost"
+	}
+
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if port <= 0 {
+		// 未知端口时退回相对根路径（至少不是跨站地址）
+		return "/"
+	}
+	return fmt.Sprintf("%s://%s:%d/", scheme, host, port)
+}
+
+// loginRequiredHTML 生成带正确登录地址的引导页
+func (g *Gateway) loginRequiredHTML(r *http.Request) string {
+	url := g.loginURL(r)
+	// 只允许安全的 URL 进入 HTML 属性（避免 r.Host 被构造成注入点）
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") && url != "/" {
+		url = "/"
+	}
+	return strings.Replace(loginRequiredPage, `href="/"`, `href="`+html.EscapeString(url)+`"`, 1)
 }
 
 // wantsHTML 判断请求是否期望 HTML 响应

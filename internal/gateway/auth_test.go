@@ -3,6 +3,7 @@ package gateway
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -214,4 +215,53 @@ func contains(s, sub string) bool {
 		}
 		return false
 	})()
+}
+
+// TestLoginLinkPointsToWebUI 登录引导页的链接必须指向 FPKM Web 界面，
+// 而不是网关自己的根路径。
+//
+// 这是实测发现的真实缺陷：网关与 Web 是**不同端口**的两个进程
+// （如 gateway=7666、web=7667），早期硬编码 href="/"，
+// 用户点「前往登录」会落到网关根路径并得到 404「未找到匹配的应用路由」。
+func TestLoginLinkPointsToWebUI(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{BaseDir: dir}
+
+	// 模拟 Web 进程写入的端口记录
+	if err := os.WriteFile(cfg.WebPortFile(), []byte("7667"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := session.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := &Gateway{cfg: cfg, routes: map[string]*Route{}, gate: true, sessions: st}
+
+	req := httptest.NewRequest(http.MethodGet, "http://nas:7666/app/demo/", nil)
+	req.Host = "nas:7666"
+	req.Header.Set("Accept", "text/html")
+	rec := httptest.NewRecorder()
+	g.writeLoginRequired(rec, req)
+
+	body := rec.Body.String()
+	if !contains(body, `href="http://nas:7667/"`) {
+		t.Errorf("引导页应链接到 Web 界面 http://nas:7667/，实际内容:\n%s",
+			body)
+	}
+	// 不应再出现指向网关根路径的裸 "/"
+	if contains(body, `href="/"`) {
+		t.Error("不应使用 href=\"/\"（会落到网关根路径并 404）")
+	}
+}
+
+// TestLoginLinkFallsBackGracefully 未记录端口时不应产生坏链接
+func TestLoginLinkFallsBackGracefully(t *testing.T) {
+	dir := t.TempDir()
+	g := &Gateway{cfg: &config.Config{BaseDir: dir}, routes: map[string]*Route{}}
+
+	req := httptest.NewRequest(http.MethodGet, "http://nas:7666/app/demo/", nil)
+	req.Host = "nas:7666"
+	if got := g.loginURL(req); got != "/" {
+		t.Errorf("未记录端口时应退回 \"/\"，实际 %q", got)
+	}
 }
