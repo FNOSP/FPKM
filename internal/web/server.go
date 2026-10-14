@@ -89,6 +89,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/api/install/upload", s.handleInstallUpload) // POST 上传安装
 	api.HandleFunc("/api/tasks/", s.handleTaskStream)            // GET 任务日志流(SSE)
 	api.HandleFunc("/api/meta", s.handleMeta)                    // GET 运行环境信息
+	api.HandleFunc("/api/system/stats", s.handleSystemStats)     // GET 系统状态（桌面小组件）
 	mux.Handle("/api/", s.withAuth(api))
 
 	// 前端静态资源（SPA）

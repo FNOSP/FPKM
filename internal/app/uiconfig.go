@@ -28,7 +28,15 @@ type UIConfigEntry struct {
 	GatewaySocket string
 	Port          string
 	Title         string
-	Type          string
+	// Type 打开方式：iframe（桌面窗口内打开）或 url（浏览器标签页打开）。
+	// 见飞牛文档「应用入口」：iframe → 桌面窗口；url → 浏览器标签/外部视图。
+	Type string
+	// Protocol http / https / 空（交给系统自适应）
+	Protocol string
+	// AllUsers 是否对所有用户可见
+	AllUsers bool
+	// NoDisplay 在桌面隐藏该入口
+	NoDisplay bool
 }
 
 // uiconfigShape 对应 ui/config 的嵌套结构：{".url": {appKey: {...}}}
@@ -58,6 +66,9 @@ func ParseUIConfig(data []byte) []UIConfigEntry {
 				GatewaySocket: stringField(appConfig, "gatewaySocket"),
 				Title:         stringField(appConfig, "title"),
 				Type:          stringField(appConfig, "type"),
+				Protocol:      stringField(appConfig, "protocol"),
+				AllUsers:      boolField(appConfig, "allUsers"),
+				NoDisplay:     boolField(appConfig, "noDisplay"),
 			}
 			if port, ok := appConfig["port"]; ok {
 				switch v := port.(type) {
@@ -86,6 +97,10 @@ func parseUIConfigByRegex(data []byte) []UIConfigEntry {
 		GatewaySocket: firstSubmatch(s, `"gatewaySocket"\s*:\s*"([^"]+)"`),
 		Title:         firstSubmatch(s, `"title"\s*:\s*"([^"]+)"`),
 		Type:          firstSubmatch(s, `"type"\s*:\s*"([^"]+)"`),
+		Protocol:      firstSubmatch(s, `"protocol"\s*:\s*"([^"]*)"`),
+	}
+	if strings.Contains(s, `"noDisplay": true`) || strings.Contains(s, `"noDisplay":true`) {
+		entry.NoDisplay = true
 	}
 	if p := firstSubmatch(s, `"port"\s*:\s*"?(\d+)"?`); p != "" {
 		entry.Port = p
@@ -103,6 +118,16 @@ func firstSubmatch(s, pattern string) string {
 		return m[1]
 	}
 	return ""
+}
+
+// boolField 读取布尔字段（不存在时返回 false）
+func boolField(m map[string]interface{}, key string) bool {
+	if v, ok := m[key]; ok {
+		if b, ok := v.(bool); ok {
+			return b
+		}
+	}
+	return false
 }
 
 // stringField 读取字符串字段
@@ -181,6 +206,32 @@ func ResolveLaunchPath(targetDir, appDir, appname string) string {
 	}
 
 	return url
+}
+
+// LaunchMode 应用的打开方式（决定前端用子窗口还是新标签页）
+type LaunchMode string
+
+const (
+	// LaunchIframe 在桌面窗口内打开（ui/config 的 type=iframe）
+	LaunchIframe LaunchMode = "iframe"
+	// LaunchTab 在新浏览器标签页打开（type=url，或没有 ui/config）
+	LaunchTab LaunchMode = "tab"
+)
+
+// ResolveLaunchMode 由 ui/config 的 type 字段决定打开方式。
+//
+// 飞牛文档：type=iframe 在桌面窗口内打开；type=url 在浏览器标签页打开。
+// 若应用没有 ui/config（或字段缺失），退化为新标签页打开 —— 此时无法
+// 保证对方允许被 iframe 嵌入（很多应用会设置 X-Frame-Options）。
+func ResolveLaunchMode(targetDir, appDir string) LaunchMode {
+	entry, ok := ReadUIConfigEntry(targetDir, appDir)
+	if !ok {
+		return LaunchTab
+	}
+	if strings.EqualFold(strings.TrimSpace(entry.Type), "iframe") {
+		return LaunchIframe
+	}
+	return LaunchTab
 }
 
 // normalizePrefix 归一化网关前缀：保证以 / 开头、不以 / 结尾

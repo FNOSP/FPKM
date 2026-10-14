@@ -16,6 +16,7 @@ import {
   IconFolderOpen,
   IconSearch,
   IconHome,
+  IconDesktop,
   IconApps,
   IconExit,
   IconGridSquare,
@@ -48,6 +49,7 @@ import {
   listSources,
   saveSource,
   deleteSource,
+  streamTask,
 } from './api/client';
 
 import AppCard from './components/AppCard';
@@ -58,6 +60,7 @@ import UploadInstaller from './components/UploadInstaller';
 import InstallConfirm from './components/InstallConfirm';
 import WizardModal from './components/WizardModal';
 import AppDetailPage from './components/AppDetailPage';
+import Desktop from './desktop/Desktop';
 import { buildAccessURL } from './utils/format';
 import TaskModal from './components/TaskModal';
 import Settings, { type SettingsTab } from './components/Settings';
@@ -75,6 +78,8 @@ export default function App() {
   const [needsSetup, setNeedsSetup] = useState(false);
   const [needLogin, setNeedLogin] = useState(false);
 
+  // 顶层模式：desktop=FPKM 桌面（默认）；store=应用商店（原界面）
+  const [mode, setMode] = useState<'desktop' | 'store'>('desktop');
   const [view, setView] = useState<View>('home');
   // 详情页目标：已安装应用名 或 商店条目 id
   const [detailTarget, setDetailTarget] = useState<{ appname?: string; storeId?: string } | null>(null);
@@ -436,6 +441,45 @@ export default function App() {
     );
   }, [apps, keyword]);
 
+  /* ---------- FPKM 桌面（默认视图） ---------- */
+
+  /**
+   * 启动应用并等待任务结束。
+   *
+   * 与 runAction 不同，这里返回 Promise 并等待任务真正完成 ——
+   * 桌面要在启动成功后才能安全地打开应用的访问地址（否则端口还没起来，
+   * iframe 会加载到空白页）。失败时返回 false，由调用方提示用户。
+   */
+  const startFromDesktop = useCallback(
+    (name: string): Promise<boolean> =>
+      new Promise<boolean>((resolve) => {
+        appAction(name, 'start')
+          .then((res) => {
+            let settled = false;
+            const done = (ok: boolean) => {
+              if (settled) return;
+              settled = true;
+              close();
+              resolve(ok);
+            };
+            const close = streamTask(res.taskId, {
+              onLog: () => undefined,
+              onDone: (snap: { state?: string } | null) => {
+                // 启动结束后刷新已安装列表，
+                // 让桌面图标上的「运行中」绿点与任务栏状态及时更新。
+                void refreshInstalled();
+                done(snap?.state !== 'failed');
+              },
+              onError: () => done(false),
+            });
+            // 兜底：避免极端情况下 Promise 永不 resolve
+            window.setTimeout(() => done(false), 120000);
+          })
+          .catch(() => resolve(false));
+      }),
+    [refreshInstalled],
+  );
+
   const runningCount = apps.filter((a) => a.running).length;
   const updatableCount = (store?.apps ?? []).filter((a) => a.updateAvailable).length;
 
@@ -567,6 +611,31 @@ export default function App() {
     />
   ) : null;
 
+  const openAppDetailFromDesktop = (name: string) => {
+    blurActive();
+    setDetailFrom('desktop' as View);
+    setDetailTarget({ appname: name });
+    // 详情页仍复用商店外壳，因此切到 store 模式
+    setMode('store');
+    setView('detail');
+  };
+
+  if (mode === 'desktop') {
+    return (
+      <Desktop
+        apps={apps}
+        meta={meta}
+        loading={loading}
+        onOpenStore={() => {
+          setMode('store');
+          setView('home');
+        }}
+        onStartApp={startFromDesktop}
+        onOpenDetail={openAppDetailFromDesktop}
+      />
+    );
+  }
+
   return (
     <div className="fpkm-shell">
       {/* ================= 侧边栏 ================= */}
@@ -580,6 +649,18 @@ export default function App() {
         </div>
 
         <nav className="fpkm-nav">
+          {/* 返回 FPKM 桌面 */}
+          <div
+            className="fpkm-nav-item fpkm-nav-back-desktop"
+            onClick={() => {
+              blurActive();
+              setMode('desktop');
+            }}
+          >
+            <IconDesktop />
+            返回桌面
+          </div>
+
           <div
             className={`fpkm-nav-item ${view === 'home' ? 'fpkm-nav-item-active' : ''}`}
             onClick={() => {

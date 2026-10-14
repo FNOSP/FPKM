@@ -2,6 +2,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import '@semi-css';
 import './styles/global.css';
+import './styles/desktop.css';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 

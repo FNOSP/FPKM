@@ -99,7 +99,7 @@ func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
 		}
 
 		env, _ := app.LoadEnvFile(s.cfg.AppEnvFile(info.Name))
-		v.Access = describeAccess(s.cfg, info.Name, v.Port, env)
+		v.Access = describeAccessFor(s.cfg, info.Name, v.Port, env, s.cfg.AppDir(info.Name))
 		v.Kind = v.Access.Kind
 
 		// 从商店索引匹配远程图标与条目 ID，供前端作兜底显示与"更新"入口
@@ -266,16 +266,39 @@ type AccessInfo struct {
 	AccessPort int `json:"accessPort,omitempty"`
 	// Scheme 目前固定 http（网关/应用均为明文 HTTP）
 	Scheme string `json:"scheme,omitempty"`
+	// LaunchMode 打开方式：iframe（桌面窗口内打开）或 tab（新标签页）。
+	// 取自 ui/config 的 type 字段，见 app.ResolveLaunchMode。
+	LaunchMode string `json:"launchMode,omitempty"`
+	// Title ui/config 里的入口名（可作为桌面图标名）
+	Title string `json:"title,omitempty"`
 }
 
-// describeAccess 判断应用的接入方式与访问参数
+// describeAccess 判断应用的接入方式与访问参数。
+// launch 由调用方通过 describeAccessFor 传入应用目录，用于读取 ui/config。
 func describeAccess(cfg *config.Config, name, port string, env app.EnvMap) AccessInfo {
+	return describeAccessFor(cfg, name, port, env, "")
+}
+
+// describeAccessFor 在 describeAccess 基础上读取 ui/config 的入口类型，
+// 决定前端用子窗口（iframe）还是新标签页（tab）打开。
+func describeAccessFor(cfg *config.Config, name, port string, env app.EnvMap, appDir string) AccessInfo {
 	if env == nil {
 		env = app.EnvMap{}
 	}
 	gatewayPort := cfg.GatewayPort
 	if gatewayPort <= 0 {
 		gatewayPort = 7666
+	}
+
+	// ui/config 的入口类型（缺省按新标签页处理）
+	launchMode := string(app.LaunchTab)
+	entryTitle := ""
+	if appDir != "" {
+		targetDir := filepath.Join(appDir, "target")
+		launchMode = string(app.ResolveLaunchMode(targetDir, appDir))
+		if entry, ok := app.ReadUIConfigEntry(targetDir, appDir); ok {
+			entryTitle = strings.TrimSpace(entry.Title)
+		}
 	}
 
 	// 网关 / CGI 应用：打开路径优先用 ui/config 的 url（env 中的 LAUNCH_PATH），
@@ -295,6 +318,8 @@ func describeAccess(cfg *config.Config, name, port string, env app.EnvMap) Acces
 			Prefix:     env["GATEWAY_PREFIX"],
 			AccessPort: gatewayPort,
 			Scheme:     "http",
+			LaunchMode: launchMode,
+			Title:      entryTitle,
 		}
 	}
 
@@ -308,6 +333,8 @@ func describeAccess(cfg *config.Config, name, port string, env app.EnvMap) Acces
 			AccessPath: "/",
 			AccessPort: p,
 			Scheme:     "http",
+			LaunchMode: launchMode,
+			Title:      entryTitle,
 		}
 	}
 	return AccessInfo{Kind: "unknown"}

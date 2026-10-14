@@ -100,7 +100,7 @@ func (s *Server) detailForInstalled(w http.ResponseWriter, name string) {
 	}
 
 	env, _ := app.LoadEnvFile(s.cfg.AppEnvFile(name))
-	detail.Access = describeAccess(s.cfg, name, detail.Port, env)
+	detail.Access = describeAccessFor(s.cfg, name, detail.Port, env, s.cfg.AppDir(name))
 	detail.Kind = detail.Access.Kind
 
 	// 与商店对应条目合并展示信息（下载量、图标、仓库等），并判断可升级
@@ -191,7 +191,7 @@ func (s *Server) detailForStore(w http.ResponseWriter, storeID string) {
 			detail.Port = st.Port
 		}
 		env, _ := app.LoadEnvFile(s.cfg.AppEnvFile(appKey))
-		detail.Access = describeAccess(s.cfg, appKey, detail.Port, env)
+		detail.Access = describeAccessFor(s.cfg, appKey, detail.Port, env, s.cfg.AppDir(appKey))
 		detail.Kind = detail.Access.Kind
 	}
 

@@ -241,3 +241,59 @@ func TestReadPortRejectsPlaceholder(t *testing.T) {
 		t.Errorf("占位符端口应返回空字符串，实际 %q", got)
 	}
 }
+
+// TestResolveLaunchMode 验证 ui/config 的 type 决定打开方式。
+// 飞牛文档：iframe → 桌面窗口内打开；url → 浏览器标签页。
+func TestResolveLaunchMode(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  string
+		want LaunchMode
+	}{
+		{"iframe → 子窗口", `{".url":{"a.x":{"type":"iframe","url":"/app/a"}}}`, LaunchIframe},
+		{"url → 新标签页", `{".url":{"a.x":{"type":"url","url":"/app/a"}}}`, LaunchTab},
+		{"大写 IFrame 也识别", `{".url":{"a.x":{"type":"IFRAME"}}}`, LaunchIframe},
+		{"无 type 默认新标签页", `{".url":{"a.x":{"url":"/app/a"}}}`, LaunchTab},
+		{"非标准 JSON 兜底", `{".url":{"a.x":{"type":"iframe",},},}`, LaunchIframe},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			appDir := filepath.Join(dir, "app")
+			target := filepath.Join(appDir, "target")
+			if err := os.MkdirAll(filepath.Join(target, "ui"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(target, "ui", "config"), []byte(c.cfg), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if got := ResolveLaunchMode(target, appDir); got != c.want {
+				t.Errorf("ResolveLaunchMode = %q, 期望 %q", got, c.want)
+			}
+		})
+	}
+	t.Run("无 ui/config → 新标签页", func(t *testing.T) {
+		dir := t.TempDir()
+		if got := ResolveLaunchMode(filepath.Join(dir, "t"), dir); got != LaunchTab {
+			t.Errorf("= %q, 期望 %q", got, LaunchTab)
+		}
+	})
+}
+
+// TestParseUIConfigProtocol 验证 protocol 与可见性字段被解析
+func TestParseUIConfigProtocol(t *testing.T) {
+	cfg := `{".url":{"a.main":{
+      "title":"My App","type":"iframe","protocol":"https",
+      "url":"/app/a","allUsers":true,"noDisplay":false}}}`
+	entries := ParseUIConfig([]byte(cfg))
+	if len(entries) != 1 {
+		t.Fatalf("条目数 = %d", len(entries))
+	}
+	e := entries[0]
+	if e.Type != "iframe" || e.Protocol != "https" || e.Title != "My App" {
+		t.Errorf("解析结果: %+v", e)
+	}
+	if !e.AllUsers || e.NoDisplay {
+		t.Errorf("可见性字段: allUsers=%v noDisplay=%v", e.AllUsers, e.NoDisplay)
+	}
+}

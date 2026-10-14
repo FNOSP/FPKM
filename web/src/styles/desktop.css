@@ -1,0 +1,591 @@
+/* ==========================================================================
+   FPKM 桌面外壳
+   壁纸 + 图标网格 + 可拖动子窗口 + 玻璃质感任务栏 + 右侧小组件
+   ========================================================================== */
+
+.fpkm-desktop {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  /* 深空风格渐变壁纸：底层深蓝 → 上层青紫，模拟图片 1 的科幻氛围 */
+  background:
+    radial-gradient(1200px 700px at 78% 12%, rgba(94, 234, 212, 0.16), transparent 60%),
+    radial-gradient(900px 600px at 12% 88%, rgba(129, 140, 248, 0.18), transparent 62%),
+    radial-gradient(1400px 900px at 50% 120%, rgba(56, 189, 248, 0.12), transparent 60%),
+    linear-gradient(160deg, #0b1220 0%, #101a2e 42%, #0d1526 100%);
+  color: #e6edf7;
+  user-select: none;
+  cursor: default;
+}
+
+/* 壁纸上的细网格光效，增强"科技感"，同时不干扰图标可读性 */
+.fpkm-desktop::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(148, 197, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 197, 255, 0.045) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(circle at 50% 40%, #000 25%, transparent 78%);
+  pointer-events: none;
+}
+
+/* ---------- 桌面区域 ---------- */
+
+/* 桌面可用区域：底部留给任务栏 */
+.fpkm-desktop-area {
+  position: absolute;
+  inset: 0 0 72px 0;
+  overflow: hidden;
+}
+
+.fpkm-desktop-icons {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  right: 340px; /* 给右侧小组件让位 */
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 96px);
+  grid-auto-rows: 100px;
+  gap: 6px 4px;
+  align-content: start;
+}
+
+/* 图标按钮 */
+.fpkm-desk-icon {
+  width: 96px;
+  height: 100px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: #e8eefb;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 8px 4px 6px;
+  cursor: pointer;
+  transition: background-color 0.14s ease, border-color 0.14s ease, transform 0.14s ease;
+  font-family: inherit;
+}
+
+.fpkm-desk-icon:hover {
+  background: rgba(148, 197, 255, 0.12);
+  border-color: rgba(148, 197, 255, 0.22);
+}
+
+.fpkm-desk-icon:active {
+  transform: scale(0.97);
+}
+
+/* 选中态：像真实桌面那样有半透明高亮框 */
+.fpkm-desk-icon-selected {
+  background: rgba(59, 130, 246, 0.25);
+  border-color: rgba(147, 197, 253, 0.55);
+}
+
+.fpkm-desk-icon-img {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  display: block;
+  flex-shrink: 0;
+}
+
+.fpkm-desk-icon-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 12px;
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: none;
+  /* 深色壁纸上给图标一点投影，避免浅色图标糊在背景里 */
+  filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.45));
+}
+
+/* 运行中小绿点 */
+.fpkm-desk-icon-dot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #22c55e;
+  border: 2px solid #0d1526;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.85);
+}
+
+.fpkm-desk-icon-label {
+  font-size: 12px;
+  line-height: 1.25;
+  text-align: center;
+  max-width: 88px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-all;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75);
+}
+
+.fpkm-desktop-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ---------- 子窗口 ---------- */
+
+.fpkm-win {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #1b2436;
+  border: 1px solid rgba(148, 197, 255, 0.18);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.fpkm-win-active {
+  border-color: rgba(147, 197, 253, 0.5);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
+}
+
+/* 标题栏：可拖动 */
+.fpkm-win-bar {
+  height: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px 0 12px;
+  background: linear-gradient(180deg, rgba(45, 60, 88, 0.96), rgba(32, 44, 66, 0.96));
+  border-bottom: 1px solid rgba(148, 197, 255, 0.14);
+  cursor: grab;
+}
+
+.fpkm-win-bar:active {
+  cursor: grabbing;
+}
+
+.fpkm-win-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #e6edf7;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.fpkm-win-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.fpkm-win-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* 窗口按钮在深色标题栏上的配色 */
+.fpkm-win-actions .semi-button {
+  color: #cbd5e1;
+}
+
+.fpkm-win-actions .semi-button:hover {
+  background-color: rgba(148, 197, 255, 0.16) !important;
+  color: #fff;
+}
+
+.fpkm-win-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: #fff;
+}
+
+.fpkm-win-iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+.fpkm-win-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.fpkm-win-failed {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 28px;
+  background: #fff;
+}
+
+/* 八向缩放手柄 */
+.fpkm-win-resize {
+  position: absolute;
+  z-index: 5;
+}
+
+.fpkm-win-resize-n { top: -3px; left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
+.fpkm-win-resize-s { bottom: -3px; left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
+.fpkm-win-resize-e { right: -3px; top: 8px; bottom: 8px; width: 6px; cursor: ew-resize; }
+.fpkm-win-resize-w { left: -3px; top: 8px; bottom: 8px; width: 6px; cursor: ew-resize; }
+.fpkm-win-resize-ne { top: -3px; right: -3px; width: 12px; height: 12px; cursor: nesw-resize; }
+.fpkm-win-resize-nw { top: -3px; left: -3px; width: 12px; height: 12px; cursor: nwse-resize; }
+.fpkm-win-resize-se { bottom: -3px; right: -3px; width: 12px; height: 12px; cursor: nwse-resize; }
+.fpkm-win-resize-sw { bottom: -3px; left: -3px; width: 12px; height: 12px; cursor: nesw-resize; }
+
+/* ---------- 玻璃质感任务栏 ---------- */
+
+.fpkm-taskbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px 10px;
+  z-index: 9000;
+  pointer-events: none;
+}
+
+.fpkm-taskbar-inner {
+  pointer-events: auto;
+  width: 100%;
+  max-width: 1180px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  border-radius: 18px;
+  /* 毛玻璃：半透明底 + 背景模糊 + 细高光边 */
+  background: rgba(22, 32, 50, 0.55);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  border: 1px solid rgba(160, 205, 255, 0.22);
+  box-shadow:
+    0 10px 34px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.fpkm-taskbar-left,
+.fpkm-taskbar-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.fpkm-taskbar-center {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.fpkm-taskbar-center::-webkit-scrollbar {
+  display: none;
+}
+
+.fpkm-taskbar-hint {
+  font-size: 12px;
+  color: rgba(203, 213, 225, 0.6);
+  padding-left: 4px;
+}
+
+.fpkm-taskbar-btn {
+  width: 40px;
+  height: 40px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: #dbe6f5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.fpkm-taskbar-btn:hover {
+  background: rgba(148, 197, 255, 0.18);
+  border-color: rgba(148, 197, 255, 0.3);
+}
+
+/* 任务栏上的窗口按钮 */
+.fpkm-taskbar-task {
+  height: 40px;
+  max-width: 190px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid rgba(148, 197, 255, 0.16);
+  border-radius: 11px;
+  background: rgba(148, 197, 255, 0.08);
+  color: #e6edf7;
+  font-size: 12.5px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.fpkm-taskbar-task:hover {
+  background: rgba(148, 197, 255, 0.2);
+}
+
+/* 当前活动窗口高亮（底部一条指示条，像真实任务栏） */
+.fpkm-taskbar-task-active {
+  background: rgba(59, 130, 246, 0.32);
+  border-color: rgba(147, 197, 253, 0.55);
+  position: relative;
+}
+
+.fpkm-taskbar-task-active::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -6px;
+  height: 2px;
+  border-radius: 2px;
+  background: #60a5fa;
+}
+
+.fpkm-taskbar-task-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  object-fit: contain;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.fpkm-taskbar-task-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 右侧小组件 ---------- */
+
+.fpkm-widgets {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 296px;
+  max-height: calc(100% - 32px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 2px;
+  scrollbar-width: thin;
+}
+
+.fpkm-widget {
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: rgba(20, 30, 48, 0.5);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  border: 1px solid rgba(160, 205, 255, 0.18);
+  box-shadow:
+    0 8px 26px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  color: #e6edf7;
+}
+
+.fpkm-widget-clock {
+  text-align: right;
+  padding: 12px 18px;
+}
+
+.fpkm-clock-time {
+  font-size: 40px;
+  font-weight: 300;
+  line-height: 1.05;
+  letter-spacing: 1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.fpkm-clock-date {
+  font-size: 12.5px;
+  color: rgba(203, 213, 225, 0.72);
+  margin-top: 4px;
+}
+
+.fpkm-widget-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: #e8eefb;
+}
+
+.fpkm-widget-title .semi-icon {
+  font-size: 15px;
+  color: #7dd3fc;
+}
+
+.fpkm-widget-pct {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 13px;
+  font-weight: 600;
+  color: #7dd3fc;
+}
+
+.fpkm-widget-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.fpkm-widget-gauge {
+  flex-shrink: 0;
+}
+
+.fpkm-widget-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fpkm-widget-col .semi-typography {
+  color: #e6edf7;
+}
+
+.fpkm-widget-kv {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12.5px;
+  padding: 5px 0;
+  border-top: 1px solid rgba(148, 197, 255, 0.1);
+}
+
+.fpkm-widget-kv span {
+  color: rgba(203, 213, 225, 0.78);
+}
+
+.fpkm-widget-kv b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.fpkm-widget-sub {
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(203, 213, 225, 0.75);
+  font-variant-numeric: tabular-nums;
+}
+
+.fpkm-widget-disk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 11.5px;
+}
+
+.fpkm-widget-disk-mount {
+  width: 62px;
+  flex-shrink: 0;
+  color: rgba(203, 213, 225, 0.72);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fpkm-widget-disk-pct {
+  width: 34px;
+  text-align: right;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: rgba(203, 213, 225, 0.85);
+}
+
+.fpkm-widget-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  text-align: center;
+}
+
+.fpkm-widget-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fpkm-widget-stats b {
+  font-size: 19px;
+  font-weight: 600;
+  color: #7dd3fc;
+  font-variant-numeric: tabular-nums;
+}
+
+.fpkm-widget-stats span {
+  font-size: 11px;
+  color: rgba(203, 213, 225, 0.7);
+}
+
+/* 小组件里的进度条在深色背景上的配色 */
+.fpkm-widget .semi-progress-track {
+  background-color: rgba(148, 197, 255, 0.16);
+}
+
+.fpkm-widget .semi-progress-circle-text {
+  color: #e6edf7;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* 窄屏：隐藏小组件，给图标让出空间 */
+@media (max-width: 900px) {
+  .fpkm-widgets {
+    display: none;
+  }
+  .fpkm-desktop-icons {
+    right: 18px;
+  }
+}

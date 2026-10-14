@@ -13,6 +13,10 @@ export interface AccessInfo {
   /** 浏览器应访问的端口 */
   accessPort?: number;
   scheme?: string;
+  /** 打开方式：iframe=桌面窗口内打开；tab=新浏览器标签页（取自 ui/config 的 type） */
+  launchMode?: 'iframe' | 'tab';
+  /** ui/config 里的入口名（可作桌面图标名） */
+  title?: string;
 }
 
 export interface AppView {
@@ -265,4 +269,24 @@ export interface WizardResponse {
   title: string;
   steps: WizardStep[] | null;
   defaults: Record<string, string> | null;
+}
+
+/** 桌面图标（内置 + 应用） */
+export interface DesktopIcon {
+  /** 唯一键：内置为 builtin:<id>，应用为 app:<name> */
+  key: string;
+  /** 显示名 */
+  label: string;
+  /** 图标地址 */
+  icon: string;
+  /** 打开方式 */
+  launchMode: 'iframe' | 'tab';
+  /** 目标 URL（null 表示打开应用商店内部视图） */
+  target: string | null;
+  /** 内置图标类型（如 store） */
+  builtin?: 'store';
+  /** 关联的应用名（内置图标为空） */
+  appName?: string;
+  /** 是否运行中 */
+  running?: boolean;
 }

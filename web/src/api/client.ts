@@ -406,3 +406,21 @@ export function waitTask(
     void onProgress;
   });
 }
+
+// ---------- 系统状态（桌面小组件） ----------
+
+export interface SystemStats {
+  hostname: string;
+  platform: string;
+  uptime: number;
+  serverTime: string;
+  cpu: { load1: number; load5: number; load15: number; cores: number; usage: number };
+  mem: { total: number; used: number; available: number; percent: number };
+  disks: { mount: string; total: number; used: number; available: number; percent: number }[];
+  store: { installed: number; running: number; total: number };
+}
+
+/** 系统状态（内存/存储/负载） */
+export function getSystemStats(): Promise<SystemStats> {
+  return request('/api/system/stats');
+}
