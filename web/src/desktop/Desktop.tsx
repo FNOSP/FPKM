@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Toast, Spin } from '@douyinfe/semi-ui';
+import { Toast, Spin, Dropdown } from '@douyinfe/semi-ui';
 import type { AppView, DesktopIcon, MetaInfo } from '../api/types';
 import { getSystemStats, iconURL, type SystemStats } from '../api/client';
 import { buildAccessURL } from '../utils/format';
@@ -11,7 +11,7 @@ interface Props {
   apps: AppView[];
   meta: MetaInfo | null;
   loading: boolean;
-  /** 打开应用商店（内部视图） */
+  /** 打开应用商店（内部视图，供"返回桌面"等场景使用） */
   onOpenStore: () => void;
   /** 启动应用；resolve 为 true 表示启动成功 */
   onStartApp: (name: string) => Promise<boolean>;
@@ -23,10 +23,15 @@ const STORE_ICON: DesktopIcon = {
   key: 'builtin:store',
   label: '应用商店',
   icon: '/fpkm-logo.png',
-  launchMode: 'tab',
-  target: null,
+  // 商店在桌面子窗口内打开（/?embed=store 只渲染商店外壳），
+  // 这样关掉/最小化窗口就能回到桌面。
+  launchMode: 'iframe',
+  target: '/?embed=store',
   builtin: 'store',
 };
+
+/** 任务栏隐藏列表的存储键（用户从任务栏移除的应用） */
+const DOCK_HIDDEN_KEY = 'fpkm.dock.hidden';
 
 const DEFAULT_W = 960;
 const DEFAULT_H = 620;
@@ -39,6 +44,31 @@ export default function Desktop({ apps, meta, loading, onOpenStore, onStartApp, 
   const [stats, setStats] = useState<SystemStats | null>(null);
   const desktopRef = useRef<HTMLDivElement>(null);
   const [bounds, setBounds] = useState({ w: 1280, h: 720 });
+
+  /**
+   * 任务栏（Dock）隐藏的应用。
+   * 用户可以右键任务栏图标「从任务栏移除」，该应用名会记在这里；
+   * 再在桌面右键该图标「保留在任务栏」即可恢复。
+   * 持久化到 localStorage，刷新后保持。
+   */
+  const [dockHidden, setDockHidden] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(DOCK_HIDDEN_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const setDockHiddenPersist = useCallback((next: string[]) => {
+    setDockHidden(next);
+    try {
+      localStorage.setItem(DOCK_HIDDEN_KEY, JSON.stringify(next));
+    } catch {
+      /* localStorage 不可用时忽略 */
+    }
+  }, []);
 
   /** 桌面可用区域（减去任务栏高度） */
   const measure = useCallback(() => {
@@ -126,12 +156,48 @@ export default function Desktop({ apps, meta, loading, onOpenStore, onStartApp, 
     [bounds.w, bounds.h],
   );
 
+  /** 在桌面上打开（或聚焦）一个应用窗口 */
+  const openWindow = useCallback(
+    (ic: DesktopIcon) => {
+      const existing = windows.find((w) => w.id === ic.key);
+      if (existing) {
+        focusWindow(ic.key);
+        return;
+      }
+      const w = Math.min(DEFAULT_W, bounds.w - 40);
+      const h = Math.min(DEFAULT_H, bounds.h - 40);
+      const nz = zTop + 1;
+      setZTop(nz);
+      setWindows((ws) => [
+        ...ws,
+        {
+          id: ic.key,
+          title: ic.label,
+          icon: ic.icon,
+          url: ic.target ?? '',
+          rect: {
+            x: Math.max(12, (bounds.w - w) / 2 - 60),
+            y: Math.max(8, (bounds.h - h) / 2 - 30),
+            w,
+            h,
+          },
+          z: nz,
+          minimized: false,
+          maximized: false,
+          loading: true,
+          failed: false,
+        },
+      ]);
+    },
+    [windows, bounds.w, bounds.h, zTop, focusWindow],
+  );
+
   /** 打开一个图标：商店走内部视图，应用按 launchMode 开子窗口或新标签页 */
   const openIcon = useCallback(
     async (ic: DesktopIcon) => {
-      // 内置应用商店 → 切换到商店界面
+      // 内置应用商店：也在桌面子窗口里打开（target 已是 /?embed=store）
       if (ic.builtin === 'store') {
-        onOpenStore();
+        openWindow(ic);
         return;
       }
       if (!ic.appName) return;
@@ -167,38 +233,33 @@ export default function Desktop({ apps, meta, loading, onOpenStore, onStartApp, 
         }
       }
 
-      const existing = windows.find((w) => w.id === ic.key);
-      if (existing) {
-        focusWindow(ic.key);
-        return;
-      }
-
-      const w = Math.min(DEFAULT_W, bounds.w - 40);
-      const h = Math.min(DEFAULT_H, bounds.h - 40);
-      const nz = zTop + 1;
-      setZTop(nz);
-      setWindows((ws) => [
-        ...ws,
-        {
-          id: ic.key,
-          title: ic.label,
-          icon: ic.icon,
-          url: ic.target!,
-          rect: {
-            x: Math.max(12, (bounds.w - w) / 2 - 60),
-            y: Math.max(8, (bounds.h - h) / 2 - 30),
-            w,
-            h,
-          },
-          z: nz,
-          minimized: false,
-          maximized: false,
-          loading: true,
-          failed: false,
-        },
-      ]);
+      openWindow(ic);
     },
-    [apps, bounds, windows, zTop, focusWindow, onOpenStore, onStartApp],
+    [apps, windows, focusWindow, openWindow, onStartApp],
+  );
+
+  /** 任务栏应显示的图标：排除用户移除的，且只显示已安装应用 + 商店 */
+  const dockIcons = useMemo(
+    () => icons.filter((ic) => ic.builtin === 'store' || !dockHidden.includes(ic.appName ?? '')),
+    [icons, dockHidden],
+  );
+
+  /** 把应用从任务栏移除（右键任务栏图标） */
+  const removeFromDock = useCallback(
+    (appName: string) => {
+      setDockHiddenPersist([...new Set([...dockHidden, appName])]);
+      Toast.info('已从任务栏移除，可在桌面右键图标恢复');
+    },
+    [dockHidden, setDockHiddenPersist],
+  );
+
+  /** 恢复应用到任务栏（桌面右键图标） */
+  const addToDock = useCallback(
+    (appName: string) => {
+      setDockHiddenPersist(dockHidden.filter((n) => n !== appName));
+      Toast.success('已保留在任务栏');
+    },
+    [dockHidden, setDockHiddenPersist],
   );
 
   const activeId = useMemo(() => {
@@ -211,33 +272,78 @@ export default function Desktop({ apps, meta, loading, onOpenStore, onStartApp, 
     <div className={`fpkm-desktop ${selected ? 'fpkm-desktop-selected' : ''}`}>
       {/* 桌面区域：图标网格 + 子窗口 */}
       <div className="fpkm-desktop-area" ref={desktopRef} onClick={() => setSelected(null)}>
+        {/* 图标网格：先排满第一列再排第二列（grid-auto-flow: column） */}
         <div className="fpkm-desktop-icons">
-          {icons.map((ic) => (
-            <button
-              key={ic.key}
-              className={`fpkm-desk-icon ${selected === ic.key ? 'fpkm-desk-icon-selected' : ''}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                setSelected(ic.key);
-              }}
-              onDoubleClick={() => openIcon(ic)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                if (ic.appName) onOpenDetail(ic.appName);
-              }}
-              title={
-                ic.builtin === 'store'
-                  ? '应用商店（双击打开）'
-                  : `${ic.label}（双击打开，右键查看详情）`
-              }
-            >
-              <span className="fpkm-desk-icon-img">
-                <img src={ic.icon} alt={ic.label} loading="lazy" />
-                {ic.running ? <span className="fpkm-desk-icon-dot" /> : null}
-              </span>
-              <span className="fpkm-desk-icon-label">{ic.label}</span>
-            </button>
-          ))}
+          {icons.map((ic) => {
+            const inDock = ic.builtin === 'store' || !dockHidden.includes(ic.appName ?? '');
+
+            const btn = (
+              <button
+                className={`fpkm-desk-icon ${selected === ic.key ? 'fpkm-desk-icon-selected' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelected(ic.key);
+                  // 单击直接打开（符合桌面习惯）
+                  void openIcon(ic);
+                }}
+                title={ic.builtin === 'store' ? '应用商店' : ic.label}
+              >
+                <span className="fpkm-desk-icon-img">
+                  <img src={ic.icon} alt={ic.label} loading="lazy" />
+                  {ic.running ? <span className="fpkm-desk-icon-dot" /> : null}
+                </span>
+                <span className="fpkm-desk-icon-label">{ic.label}</span>
+              </button>
+            );
+
+            // 商店没有应用名，右键只给"打开"
+            if (ic.builtin === 'store' || !ic.appName) {
+              return (
+                <Dropdown
+                  key={ic.key}
+                  trigger="contextMenu"
+                  position="bottomLeft"
+                  clickToHide
+                  render={
+                    <Dropdown.Menu>
+                      <Dropdown.Item onClick={() => void openIcon(ic)}>打开</Dropdown.Item>
+                    </Dropdown.Menu>
+                  }
+                >
+                  <span className="fpkm-desk-slot">{btn}</span>
+                </Dropdown>
+              );
+            }
+
+            return (
+              <Dropdown
+                key={ic.key}
+                trigger="contextMenu"
+                position="bottomLeft"
+                clickToHide
+                render={
+                  <Dropdown.Menu>
+                    <Dropdown.Item onClick={() => void openIcon(ic)}>打开</Dropdown.Item>
+                    {/* 从任务栏移除后，这里变成恢复入口 */}
+                    {inDock ? (
+                      <Dropdown.Item onClick={() => removeFromDock(ic.appName!)}>
+                        从任务栏移除
+                      </Dropdown.Item>
+                    ) : (
+                      <Dropdown.Item onClick={() => addToDock(ic.appName!)}>
+                        保留在任务栏
+                      </Dropdown.Item>
+                    )}
+                    <Dropdown.Item onClick={() => onOpenDetail(ic.appName!)}>
+                      应用详情
+                    </Dropdown.Item>
+                  </Dropdown.Menu>
+                }
+              >
+                <span className="fpkm-desk-slot">{btn}</span>
+              </Dropdown>
+            );
+          })}
         </div>
 
         {loading && apps.length === 0 ? (
@@ -272,8 +378,11 @@ export default function Desktop({ apps, meta, loading, onOpenStore, onStartApp, 
 
       {/* 玻璃质感任务栏 */}
       <Taskbar
+        icons={dockIcons}
         windows={windows}
         activeId={activeId}
+        onOpenIcon={openIcon}
+        onRemoveFromDock={removeFromDock}
         onOpenStore={onOpenStore}
         onFocusWindow={focusWindow}
         onRestoreAll={() => setWindows((ws) => ws.map((w) => ({ ...w, minimized: false })))}

@@ -165,6 +165,66 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.61 桌面交互修订
+
+**1. 应用商店改为子窗口打开**
+
+商店不再是"替换整个界面"，而是桌面上的一个普通应用窗口：
+
+- 桌面图标 target 为 `/?embed=store`，前端识别 `embed=store` 后
+  **只渲染商店外壳**（不渲染桌面），从而可被 iframe 内嵌；
+- 关闭/最小化商店窗口即回到桌面（此前进入商店后没有任何返回入口）；
+- 内嵌模式下隐藏侧边栏的「返回桌面」条目（窗口自带标题栏）。
+
+**2. 图标网格改为列优先**
+
+`grid-auto-flow: column` + `grid-template-rows: repeat(auto-fill, 100px)`：
+先自上而下排满第一列，再排第二列（与真实桌面一致）。
+实测在 420px 高视口下为「第1列: 商店/Lucky/文件收集器，第2列: FN软仓」。
+
+**3. macOS 风格 Dock**
+
+任务栏重做为 Dock（`.fpkm-dock`）：
+
+| 行为 | 说明 |
+|------|------|
+| 常驻显示 | 已安装应用直接显示在 Dock 上，**只显示图标**（无文字） |
+| 打开态指示 | 该应用有窗口时，图标**下方显示小圆点** |
+| 单击 | 打开应用或聚焦已有窗口 |
+| 右键 Dock 图标 | 「从任务栏移除」 |
+| 右键桌面图标 | 「保留在任务栏」恢复（含「打开」「应用详情」） |
+| 持久化 | 移除/恢复记录存 localStorage，刷新后保持 |
+
+**4. 单击即打开**
+
+桌面图标由「双击打开」改为**单击打开**（单击同时选中）。
+
+**5. 修复：暗黑模式下窗口标题栏文字看不清**
+
+窗口标题栏底色是本文件固定的深色渐变，但 Semi 会给其中元素直接上色：
+
+```
+.semi-typography                          { color: var(--semi-color-text-0) }  → 深色
+.semi-button-tertiary.semi-button-borderless { color: var(--semi-color-text-1) }  → 深色
+```
+
+这些规则与原 `.fpkm-win-actions .semi-button`（同为 2 个类）权重相同，
+而打包后的 CSS 顺序不保证与 import 顺序一致，Semi 的深色文字便盖在了
+深色标题栏上。修复方式：提高选择器权重并显式写死颜色（不依赖主题变量）：
+
+```css
+.fpkm-desktop .fpkm-win-title,
+.fpkm-desktop .fpkm-win-title .semi-typography { color: #e6edf7 !important; }
+.fpkm-desktop .fpkm-win-actions .semi-button:not(.semi-button-danger) { color: #cbd5e1 !important; }
+.fpkm-desktop .fpkm-win-actions .semi-button-danger { color: #ff6b5e !important; }
+```
+
+实测（`colorScheme: dark`）：标题亮度 236、控制按钮 212、关闭按钮为红色。
+
+> 另一个同类坑：Dock 图标原用 Semi `Tooltip` 做悬浮提示，但 Tooltip 渲染到
+> `.semi-portal-inner`，会盖住图标并**截获鼠标事件**，导致右键菜单点不出来。
+> 已改用原生 `title` 属性（无 portal，不拦截事件）。
+
 ### 0.60 FPKM 桌面（分支 feature/desktop-shell）
 
 把 FPKM 从"应用商店"升级为**桌面环境**：应用商店成为桌面上的一个内置图标。

@@ -33,10 +33,10 @@
 
 /* ---------- 桌面区域 ---------- */
 
-/* 桌面可用区域：底部留给任务栏 */
+/* 桌面可用区域：底部留给 Dock */
 .fpkm-desktop-area {
   position: absolute;
-  inset: 0 0 72px 0;
+  inset: 0 0 76px 0;
   overflow: hidden;
 }
 
@@ -45,11 +45,21 @@
   top: 18px;
   left: 18px;
   right: 340px; /* 给右侧小组件让位 */
+  bottom: 12px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, 96px);
-  grid-auto-rows: 100px;
+  /* 列优先排列：先自上而下排满第一列，再排第二列（与真实桌面一致）。
+     行数由可用高度决定，auto-fill 的列用于承载溢出。 */
+  grid-auto-flow: column;
+  grid-template-rows: repeat(auto-fill, 100px);
+  grid-auto-columns: 96px;
   gap: 6px 4px;
   align-content: start;
+  justify-content: start;
+}
+
+/* 图标/菜单的包裹层：作为 Dropdown 的触发元素 */
+.fpkm-desk-slot {
+  display: inline-block;
 }
 
 /* 图标按钮 */
@@ -201,14 +211,40 @@
   gap: 2px;
 }
 
-/* 窗口按钮在深色标题栏上的配色 */
-.fpkm-win-actions .semi-button {
-  color: #cbd5e1;
+/* ---------- 窗口标题栏配色（必须在明/暗两种主题下都清晰） ----------
+
+   坑：窗口标题栏的底色由本文件固定为深色渐变，但 Semi 会给其中的
+   文本元素直接上色：
+     .semi-typography { color: var(--semi-color-text-0) }        → 深色
+     .semi-button-tertiary.semi-button-borderless { color: ... }  → 深色
+   这些规则与本文件的 `.fpkm-win-actions .semi-button` 权重相同（都是
+   2 个类），而 Vite 打包后的 CSS 顺序不一定与 import 顺序一致，
+   于是 Semi 的深色文字会盖在深色标题栏上 —— 看起来"黑得看不见"。
+
+   因此这里提高选择器权重并显式声明颜色（不依赖主题变量）。 */
+.fpkm-desktop .fpkm-win-title,
+.fpkm-desktop .fpkm-win-title .semi-typography {
+  color: #e6edf7 !important;
 }
 
-.fpkm-win-actions .semi-button:hover {
-  background-color: rgba(148, 197, 255, 0.16) !important;
-  color: #fff;
+/* 刷新/最小化/最大化：浅色图标；关闭按钮保留红色（用 :not 排除） */
+.fpkm-desktop .fpkm-win-actions .semi-button:not(.semi-button-danger) {
+  color: #cbd5e1 !important;
+}
+
+.fpkm-desktop .fpkm-win-actions .semi-button:not(.semi-button-danger):hover {
+  background-color: rgba(148, 197, 255, 0.18) !important;
+  color: #ffffff !important;
+}
+
+/* 关闭按钮：保证红色在深色底上足够醒目 */
+.fpkm-desktop .fpkm-win-actions .semi-button-danger {
+  color: #ff6b5e !important;
+}
+
+.fpkm-desktop .fpkm-win-actions .semi-button-danger:hover {
+  background-color: rgba(255, 107, 94, 0.18) !important;
+  color: #ff8a80 !important;
 }
 
 .fpkm-win-body {
@@ -263,143 +299,107 @@
 .fpkm-win-resize-se { bottom: -3px; right: -3px; width: 12px; height: 12px; cursor: nwse-resize; }
 .fpkm-win-resize-sw { bottom: -3px; left: -3px; width: 12px; height: 12px; cursor: nesw-resize; }
 
-/* ---------- 玻璃质感任务栏 ---------- */
+/* ---------- macOS 风格 Dock ---------- */
 
-.fpkm-taskbar {
+.fpkm-dock {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  height: 72px;
+  height: 76px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 16px 10px;
+  padding: 0 16px 12px;
   z-index: 9000;
   pointer-events: none;
 }
 
-.fpkm-taskbar-inner {
+.fpkm-dock-inner {
   pointer-events: auto;
-  width: 100%;
-  max-width: 1180px;
-  height: 56px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 12px;
-  border-radius: 18px;
-  /* 毛玻璃：半透明底 + 背景模糊 + 细高光边 */
-  background: rgba(22, 32, 50, 0.55);
-  backdrop-filter: blur(18px) saturate(160%);
-  -webkit-backdrop-filter: blur(18px) saturate(160%);
-  border: 1px solid rgba(160, 205, 255, 0.22);
-  box-shadow:
-    0 10px 34px rgba(0, 0, 0, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.14);
-}
-
-.fpkm-taskbar-left,
-.fpkm-taskbar-right {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.fpkm-taskbar-center {
-  flex: 1;
-  min-width: 0;
+  max-width: calc(100% - 32px);
+  height: 60px;
   display: flex;
   align-items: center;
   gap: 6px;
+  padding: 0 10px;
+  border-radius: 20px;
+  /* 毛玻璃：半透明底 + 背景模糊 + 顶部高光 */
+  background: rgba(22, 32, 50, 0.55);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(160, 205, 255, 0.22);
+  box-shadow:
+    0 12px 38px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
   overflow-x: auto;
+  overflow-y: hidden;
   scrollbar-width: none;
 }
 
-.fpkm-taskbar-center::-webkit-scrollbar {
+.fpkm-dock-inner::-webkit-scrollbar {
   display: none;
 }
 
-.fpkm-taskbar-hint {
-  font-size: 12px;
-  color: rgba(203, 213, 225, 0.6);
-  padding-left: 4px;
+.fpkm-dock-slot {
+  display: inline-flex;
+  flex-shrink: 0;
 }
 
-.fpkm-taskbar-btn {
-  width: 40px;
-  height: 40px;
+/* 单个 Dock 图标（只显示图标，不显示文字） */
+.fpkm-dock-item {
+  position: relative;
+  width: 48px;
+  height: 48px;
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: 13px;
   background: transparent;
-  color: #dbe6f5;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
-  cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
-}
-
-.fpkm-taskbar-btn:hover {
-  background: rgba(148, 197, 255, 0.18);
-  border-color: rgba(148, 197, 255, 0.3);
-}
-
-/* 任务栏上的窗口按钮 */
-.fpkm-taskbar-task {
-  height: 40px;
-  max-width: 190px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 12px;
-  border: 1px solid rgba(148, 197, 255, 0.16);
-  border-radius: 11px;
-  background: rgba(148, 197, 255, 0.08);
-  color: #e6edf7;
-  font-size: 12.5px;
   cursor: pointer;
   flex-shrink: 0;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
+  transition: transform 0.16s ease, background-color 0.16s ease, border-color 0.16s ease;
 }
 
-.fpkm-taskbar-task:hover {
-  background: rgba(148, 197, 255, 0.2);
+.fpkm-dock-item:hover {
+  transform: translateY(-4px) scale(1.1);
+  background: rgba(148, 197, 255, 0.16);
+  border-color: rgba(148, 197, 255, 0.28);
 }
 
-/* 当前活动窗口高亮（底部一条指示条，像真实任务栏） */
-.fpkm-taskbar-task-active {
-  background: rgba(59, 130, 246, 0.32);
-  border-color: rgba(147, 197, 253, 0.55);
-  position: relative;
+.fpkm-dock-item:active {
+  transform: translateY(-1px) scale(1.02);
 }
 
-.fpkm-taskbar-task-active::after {
-  content: '';
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: -6px;
-  height: 2px;
-  border-radius: 2px;
-  background: #60a5fa;
+/* 活动窗口高亮 */
+.fpkm-dock-item-active {
+  background: rgba(59, 130, 246, 0.26);
+  border-color: rgba(147, 197, 253, 0.5);
 }
 
-.fpkm-taskbar-task-icon {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
+.fpkm-dock-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
   object-fit: contain;
-  flex-shrink: 0;
   pointer-events: none;
+  -webkit-user-drag: none;
+  user-select: none;
+  filter: drop-shadow(0 3px 7px rgba(0, 0, 0, 0.45));
 }
 
-.fpkm-taskbar-task-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* 有打开窗口时的小圆点 */
+.fpkm-dock-dot {
+  position: absolute;
+  left: 50%;
+  bottom: 1px;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #e6edf7;
+  box-shadow: 0 0 5px rgba(230, 237, 247, 0.9);
 }
 
 /* ---------- 右侧小组件 ---------- */

@@ -78,8 +78,17 @@ export default function App() {
   const [needsSetup, setNeedsSetup] = useState(false);
   const [needLogin, setNeedLogin] = useState(false);
 
-  // 顶层模式：desktop=FPKM 桌面（默认）；store=应用商店（原界面）
-  const [mode, setMode] = useState<'desktop' | 'store'>('desktop');
+  /**
+   * 内嵌模式：桌面的"应用商店"是桌面子窗口，iframe 指向 /?embed=store。
+   * 这样商店自带一套独立的外壳，桌面始终在窗口后面（可最小化后回到桌面），
+   * 而不是把桌面整个替换掉。
+   */
+  const [embedMode] = useState(
+    () => new URLSearchParams(window.location.search).get('embed') === 'store',
+  );
+
+  // 顶层模式：desktop=FPKM 桌面（默认）；store=应用商店
+  const [mode, setMode] = useState<'desktop' | 'store'>(embedMode ? 'store' : 'desktop');
   const [view, setView] = useState<View>('home');
   // 详情页目标：已安装应用名 或 商店条目 id
   const [detailTarget, setDetailTarget] = useState<{ appname?: string; storeId?: string } | null>(null);
@@ -649,17 +658,19 @@ export default function App() {
         </div>
 
         <nav className="fpkm-nav">
-          {/* 返回 FPKM 桌面 */}
-          <div
-            className="fpkm-nav-item fpkm-nav-back-desktop"
-            onClick={() => {
-              blurActive();
-              setMode('desktop');
-            }}
-          >
-            <IconDesktop />
-            返回桌面
-          </div>
+          {/* 返回 FPKM 桌面（内嵌在桌面子窗口里时不显示） */}
+          {embedMode ? null : (
+            <div
+              className="fpkm-nav-item fpkm-nav-back-desktop"
+              onClick={() => {
+                blurActive();
+                setMode('desktop');
+              }}
+            >
+              <IconDesktop />
+              返回桌面
+            </div>
+          )}
 
           <div
             className={`fpkm-nav-item ${view === 'home' ? 'fpkm-nav-item-active' : ''}`}
