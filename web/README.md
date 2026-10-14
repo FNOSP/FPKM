@@ -165,6 +165,66 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.62 桌面修订（图标 / 商店加载 / Dock 分隔线 / 只显示运行中）
+
+**1. 应用图标换成带透明通道的新图标**
+
+原 `fpkm-logo.png` 是**不透明白底**（四角 alpha=255），在深色桌面上会看到
+一个白色方块。新图标四角 alpha=0，已按同一方式重新生成全部尺寸：
+
+```python
+src = Image.open("fpkm-logo.webp").convert("RGBA")   # 保留 alpha
+src.save("web/public/fpkm-logo.png")                  # ★ 不要 flatten 到白底
+for s in (16,32,48,64,128,180,192,512):
+    src.resize((s,s), Image.LANCZOS).save(f"web/public/icon-{s}.png")
+src.save("web/public/favicon.ico", format="ICO", sizes=[...])
+```
+
+**2. 商店加载慢的原因与修复（重点）**
+
+> 疑问："打开桌面时不就已经加载了商店的 HTML 吗？"
+
+桌面启动时加载的是**主文档**。此前商店用 `<iframe src="/?embed=store">`
+打开，而 **iframe 是一个独立文档** —— 浏览器不会复用主文档已执行的 JS 运行时，
+必须重新下载、解析并执行整个 SPA（约 800KB JS + 700KB CSS），
+再从头 boot 一次 React 并重跑 bootstrap 请求。这才是"加载很久"的原因。
+
+修复：把商店改为**在同一个 React 树内渲染**，直接挂进窗口内容区：
+
+- `App` 把外壳抽成 `buildShell(onBackToDesktop)`，通过 `renderStore` 传给 `Desktop`；
+- `AppWindowFrame` 新增 `inlineContent`：有内容就直接渲染，不再创建 iframe；
+- 窗口只记录 `builtin: 'store'` 标记，内容在**每次渲染时**生成
+  （不能把 React 节点缓存在 state 里，否则会变成陈旧快照、交互失效）；
+- `/?embed=store` 与 embed 模式已移除。
+
+实测：点开商店 **0 个新增 asset 请求**（不再重新加载 SPA），DOM 就绪约 300ms，
+二次打开约 120ms。
+
+**3. Dock 商店图标右侧加分隔线**
+
+`.fpkm-dock-sep`：1×34px 竖线，并在两侧加了额外外边距
+（实测商店与首个普通应用间距由 6px 增至 30px），像 macOS 那样把
+"特殊入口"和"普通应用"分开。
+
+**4. 桌面只显示正在运行的应用**
+
+在桌面上点未运行的应用本来也打不开，摆在桌面只会误导。现在：
+
+- **桌面**：只显示 `running` 的应用（+ 内置商店图标）；
+- **Dock**：仍然常驻显示**全部已安装**应用（保留 0.61 的行为）；
+- 桌面图标上的绿点已移除（桌面上的应用必然在运行，绿点已无信息量）。
+
+带来的连带问题与处理：未运行的应用不在桌面上，于是"从任务栏移除后如何恢复"
+在桌面找不到入口。为此把 Dock 显隐状态抽成 `web/src/desktop/dock.ts`
+（`useDock()`，基于 localStorage + 自定义事件跨组件同步），
+并在商店的「已安装」卡片上新增**「移出任务栏 / 固定到任务栏」**按钮作为恢复入口。
+
+**顺带修复：构建脚本不做类型检查**
+
+`package.json` 的 `build` 只是 `vite build`，而 Vite 用 esbuild 转译时
+**不进行类型检查** —— 类型错误被静默忽略并产出"能跑但有 bug"的产物。
+`scripts/build-web.sh` 已在打包前显式执行 `npx tsc --noEmit`。
+
 ### 0.61 桌面交互修订
 
 **1. 应用商店改为子窗口打开**

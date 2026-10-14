@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { Dropdown } from '@douyinfe/semi-ui';
 import type { DesktopIcon } from '../api/types';
 import type { AppWindow } from './AppWindowFrame';
@@ -40,8 +41,10 @@ export default function Taskbar({ icons, windows, activeId, onOpenIcon, onRemove
   return (
     <div className="fpkm-dock">
       <div className="fpkm-dock-inner">
-        {icons.map((ic) => {
+        {icons.map((ic, idx) => {
           const open = isOpen(ic);
+          // 商店与普通应用之间插入分隔线
+          const showSep = ic.builtin === 'store' && icons.length > idx + 1;
           const btn = (
             <button
               className={`fpkm-dock-item ${isActive(ic) ? 'fpkm-dock-item-active' : ''}`}
@@ -60,9 +63,10 @@ export default function Taskbar({ icons, windows, activeId, onOpenIcon, onRemove
           // 商店是内置入口，不允许从任务栏移除
           if (ic.builtin === 'store' || !ic.appName) {
             return (
-              <span key={ic.key} className="fpkm-dock-slot">
-                {btn}
-              </span>
+              <Fragment key={ic.key}>
+                <span className="fpkm-dock-slot">{btn}</span>
+                {showSep ? <span className="fpkm-dock-sep" aria-hidden="true" /> : null}
+              </Fragment>
             );
           }
 

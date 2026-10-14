@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Button, Spin, Tooltip, Typography } from '@douyinfe/semi-ui';
 import {
   IconMinus,
@@ -34,6 +34,12 @@ export interface AppWindow {
   loading: boolean;
   /** 加载失败（多为对方禁止被 iframe 嵌入） */
   failed: boolean;
+  /**
+   * 内置内容标记。'store' 表示这扇窗口承载应用商店，
+   * 由 Desktop 在**每次渲染时**重新生成内容（不能把节点缓存在 state 里，
+   * 否则会变成陈旧快照，商店内的交互不会更新）。
+   */
+  builtin?: 'store';
 }
 
 interface Props {
@@ -65,7 +71,8 @@ export default function AppWindowFrame({
   onLoaded,
   onFailed,
   bounds,
-}: Props) {
+  inlineContent,
+}: Props & { inlineContent?: ReactNode }) {
   const [dragging, setDragging] = useState(false);
   const [resizing, setResizing] = useState<string | null>(null);
   const dragRef = useRef<{ dx: number; dy: number } | null>(null);
@@ -214,13 +221,15 @@ export default function AppWindowFrame({
 
       {/* 内容区：iframe */}
       <div className="fpkm-win-body">
-        {win.loading && !win.failed ? (
+        {win.loading && !win.failed && !inlineContent ? (
           <div className="fpkm-win-loading">
             <Spin size="large" tip="正在打开应用…" />
           </div>
         ) : null}
 
-        {win.failed ? (
+        {inlineContent ? (
+          <div className="fpkm-win-inline">{inlineContent}</div>
+        ) : win.failed ? (
           <div className="fpkm-win-failed">
             <Text strong>无法在窗口内打开该应用</Text>
             <Text type="tertiary" size="small" style={{ marginTop: 8, textAlign: 'center' }}>
@@ -239,7 +248,7 @@ export default function AppWindowFrame({
               <Button onClick={reload}>重试</Button>
             </div>
           </div>
-        ) : (
+        ) : inlineContent ? null : (
           <iframe
             ref={iframeRef}
             className="fpkm-win-iframe"

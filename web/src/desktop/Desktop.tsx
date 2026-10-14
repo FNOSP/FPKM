@@ -5,13 +5,22 @@ import { getSystemStats, iconURL, type SystemStats } from '../api/client';
 import { buildAccessURL } from '../utils/format';
 import AppWindowFrame, { type AppWindow, type WindowRect } from './AppWindowFrame';
 import Taskbar from './Taskbar';
+import { useDock } from './dock';
 import Widgets from './Widgets';
 
 interface Props {
   apps: AppView[];
   meta: MetaInfo | null;
   loading: boolean;
-  /** 打开应用商店（内部视图，供"返回桌面"等场景使用） */
+  /**
+   * 渲染应用商店内容。
+   *
+   * 由 App 传入，**在同一个 React 树内**渲染（不是 iframe）——
+   * iframe 是独立文档，会重新下载并执行整个 SPA，打开很慢。
+   * 参数是"关闭商店窗口"的回调，供商店内的「返回桌面」按钮使用。
+   */
+  renderStore: (closeStoreWindow: () => void) => React.ReactNode;
+  /** 全屏打开应用商店（兜底入口） */
   onOpenStore: () => void;
   /** 启动应用；resolve 为 true 表示启动成功 */
   onStartApp: (name: string) => Promise<boolean>;
@@ -23,21 +32,27 @@ const STORE_ICON: DesktopIcon = {
   key: 'builtin:store',
   label: '应用商店',
   icon: '/fpkm-logo.png',
-  // 商店在桌面子窗口内打开（/?embed=store 只渲染商店外壳），
-  // 这样关掉/最小化窗口就能回到桌面。
+  // 商店不是 iframe，而是在桌面窗口内**直接挂载 React 组件**。
+  // target 仅作为占位（窗口组件用它判断是否为内置内容）。
   launchMode: 'iframe',
-  target: '/?embed=store',
+  target: null,
   builtin: 'store',
 };
 
-/** 任务栏隐藏列表的存储键（用户从任务栏移除的应用） */
-const DOCK_HIDDEN_KEY = 'fpkm.dock.hidden';
 
 const DEFAULT_W = 960;
 const DEFAULT_H = 620;
 
 /** FPKM 桌面：壁纸 + 图标网格 + 子窗口 + 玻璃任务栏 + 小组件 */
-export default function Desktop({ apps, meta, loading, onOpenStore, onStartApp, onOpenDetail }: Props) {
+export default function Desktop({
+  apps,
+  meta,
+  loading,
+  renderStore,
+  onOpenStore,
+  onStartApp,
+  onOpenDetail,
+}: Props) {
   const [windows, setWindows] = useState<AppWindow[]>([]);
   const [zTop, setZTop] = useState(10);
   const [selected, setSelected] = useState<string | null>(null);
@@ -45,30 +60,9 @@ export default function Desktop({ apps, meta, loading, onOpenStore, onStartApp, 
   const desktopRef = useRef<HTMLDivElement>(null);
   const [bounds, setBounds] = useState({ w: 1280, h: 720 });
 
-  /**
-   * 任务栏（Dock）隐藏的应用。
-   * 用户可以右键任务栏图标「从任务栏移除」，该应用名会记在这里；
-   * 再在桌面右键该图标「保留在任务栏」即可恢复。
-   * 持久化到 localStorage，刷新后保持。
-   */
-  const [dockHidden, setDockHidden] = useState<string[]>(() => {
-    try {
-      const raw = localStorage.getItem(DOCK_HIDDEN_KEY);
-      const arr = raw ? JSON.parse(raw) : [];
-      return Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : [];
-    } catch {
-      return [];
-    }
-  });
-
-  const setDockHiddenPersist = useCallback((next: string[]) => {
-    setDockHidden(next);
-    try {
-      localStorage.setItem(DOCK_HIDDEN_KEY, JSON.stringify(next));
-    } catch {
-      /* localStorage 不可用时忽略 */
-    }
-  }, []);
+  /* 任务栏（Dock）隐藏列表：与商店「已安装」列表共享同一份状态，
+     这样从任务栏移除后仍可在商店里恢复。 */
+  const dock = useDock();
 
   /** 桌面可用区域（减去任务栏高度） */
   const measure = useCallback(() => {
@@ -102,23 +96,37 @@ export default function Desktop({ apps, meta, loading, onOpenStore, onStartApp, 
     };
   }, []);
 
-  /** 桌面图标：内置商店 + 已安装应用 */
-  const icons: DesktopIcon[] = useMemo(() => {
+  /**
+   * 全部图标：内置商店 + 所有已安装应用。
+   * Dock 用它（macOS 的 Dock 常驻显示已安装应用）。
+   */
+  const allIcons: DesktopIcon[] = useMemo(() => {
     const list: DesktopIcon[] = [STORE_ICON];
     for (const a of apps) {
-      const url = buildAccessURL(a.access, meta?.publicHost, meta?.publicScheme);
       list.push({
         key: `app:${a.name}`,
         label: a.access?.title || a.displayName || a.name,
         icon: iconURL(a.name),
         launchMode: (a.access?.launchMode as 'iframe' | 'tab') || 'tab',
-        target: url,
+        target: buildAccessURL(a.access, meta?.publicHost, meta?.publicScheme),
         appName: a.name,
         running: a.running,
       });
     }
     return list;
   }, [apps, meta]);
+
+  /**
+   * 桌面图标：内置商店 + **正在运行**的应用。
+   *
+   * 只显示运行中的应用 —— 未成功运行的应用点开也没有内容，
+   * 摆在桌面上只会让人以为能直接打开。未运行的应用仍在 Dock 与
+   * 商店的「已安装」列表里可以找到并启动。
+   */
+  const icons: DesktopIcon[] = useMemo(
+    () => allIcons.filter((ic) => ic.builtin === 'store' || ic.running),
+    [allIcons],
+  );
 
   const focusWindow = useCallback((id: string) => {
     setZTop((z) => {
@@ -168,6 +176,7 @@ export default function Desktop({ apps, meta, loading, onOpenStore, onStartApp, 
       const h = Math.min(DEFAULT_H, bounds.h - 40);
       const nz = zTop + 1;
       setZTop(nz);
+      const isStore = ic.builtin === 'store';
       setWindows((ws) => [
         ...ws,
         {
@@ -175,6 +184,8 @@ export default function Desktop({ apps, meta, loading, onOpenStore, onStartApp, 
           title: ic.label,
           icon: ic.icon,
           url: ic.target ?? '',
+          // 商店：打标记，渲染时再生成内容（避免缓存成陈旧快照）
+          builtin: isStore ? 'store' : undefined,
           rect: {
             x: Math.max(12, (bounds.w - w) / 2 - 60),
             y: Math.max(8, (bounds.h - h) / 2 - 30),
@@ -184,7 +195,7 @@ export default function Desktop({ apps, meta, loading, onOpenStore, onStartApp, 
           z: nz,
           minimized: false,
           maximized: false,
-          loading: true,
+          loading: !isStore,
           failed: false,
         },
       ]);
@@ -195,7 +206,7 @@ export default function Desktop({ apps, meta, loading, onOpenStore, onStartApp, 
   /** 打开一个图标：商店走内部视图，应用按 launchMode 开子窗口或新标签页 */
   const openIcon = useCallback(
     async (ic: DesktopIcon) => {
-      // 内置应用商店：也在桌面子窗口里打开（target 已是 /?embed=store）
+      // 内置应用商店：在桌面窗口内直接渲染（非 iframe）
       if (ic.builtin === 'store') {
         openWindow(ic);
         return;
@@ -240,26 +251,26 @@ export default function Desktop({ apps, meta, loading, onOpenStore, onStartApp, 
 
   /** 任务栏应显示的图标：排除用户移除的，且只显示已安装应用 + 商店 */
   const dockIcons = useMemo(
-    () => icons.filter((ic) => ic.builtin === 'store' || !dockHidden.includes(ic.appName ?? '')),
-    [icons, dockHidden],
+    () => allIcons.filter((ic) => ic.builtin === 'store' || !dock.isHidden(ic.appName ?? '')),
+    [allIcons, dock],
   );
 
   /** 把应用从任务栏移除（右键任务栏图标） */
   const removeFromDock = useCallback(
     (appName: string) => {
-      setDockHiddenPersist([...new Set([...dockHidden, appName])]);
-      Toast.info('已从任务栏移除，可在桌面右键图标恢复');
+      dock.hide(appName);
+      Toast.info('已从任务栏移除，可在应用商店的「已安装」里恢复');
     },
-    [dockHidden, setDockHiddenPersist],
+    [dock],
   );
 
-  /** 恢复应用到任务栏（桌面右键图标） */
+  /** 恢复应用到任务栏 */
   const addToDock = useCallback(
     (appName: string) => {
-      setDockHiddenPersist(dockHidden.filter((n) => n !== appName));
+      dock.show(appName);
       Toast.success('已保留在任务栏');
     },
-    [dockHidden, setDockHiddenPersist],
+    [dock],
   );
 
   const activeId = useMemo(() => {
@@ -275,7 +286,7 @@ export default function Desktop({ apps, meta, loading, onOpenStore, onStartApp, 
         {/* 图标网格：先排满第一列再排第二列（grid-auto-flow: column） */}
         <div className="fpkm-desktop-icons">
           {icons.map((ic) => {
-            const inDock = ic.builtin === 'store' || !dockHidden.includes(ic.appName ?? '');
+            const inDock = ic.builtin === 'store' || !dock.isHidden(ic.appName ?? '');
 
             const btn = (
               <button
@@ -290,7 +301,6 @@ export default function Desktop({ apps, meta, loading, onOpenStore, onStartApp, 
               >
                 <span className="fpkm-desk-icon-img">
                   <img src={ic.icon} alt={ic.label} loading="lazy" />
-                  {ic.running ? <span className="fpkm-desk-icon-dot" /> : null}
                 </span>
                 <span className="fpkm-desk-icon-label">{ic.label}</span>
               </button>
@@ -358,6 +368,7 @@ export default function Desktop({ apps, meta, loading, onOpenStore, onStartApp, 
             win={w}
             active={w.id === activeId}
             bounds={bounds}
+            inlineContent={w.builtin === 'store' ? renderStore(() => closeWindow(w.id)) : undefined}
             onFocus={() => focusWindow(w.id)}
             onClose={() => closeWindow(w.id)}
             onMinimize={() => setWindows((ws) => ws.map((x) => (x.id === w.id ? { ...x, minimized: true } : x)))}

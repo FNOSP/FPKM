@@ -7,8 +7,11 @@ import {
   IconApps,
   IconRefresh,
   IconExternalOpen,
+  IconPlusCircle,
+  IconMinusCircle,
 } from '@douyinfe/semi-icons';
 import type { AppView, AppAction } from '../api/types';
+import { useDock } from '../desktop/dock';
 import { buildAccessURL, kindLabel, stripHtml } from '../utils/format';
 import { iconURL } from '../api/client';
 
@@ -29,6 +32,10 @@ const { Text } = Typography;
 export default function AppCard({ app, busy, publicHost, publicScheme, onAction, onOpenDetail }: Props) {
   // 按当前页面的主机名拼地址，而不是写死 localhost
   const accessURL = buildAccessURL(app.access, publicHost, publicScheme);
+  // 任务栏（Dock）显隐。未运行的应用不在桌面上，
+  // 因此「从任务栏移除后如何恢复」的入口放在商店的已安装列表里。
+  const dock = useDock();
+  const inDock = !dock.isHidden(app.name);
 
   return (
     <div className="fpkm-app-card-wrap" onClick={() => onOpenDetail?.(app.name)}>
@@ -92,6 +99,22 @@ export default function AppCard({ app, busy, publicHost, publicScheme, onAction,
 
       <div className="fpkm-card-footer" onClick={(e) => e.stopPropagation()}>
         <Space spacing={6} wrap>
+          <Tooltip content={inDock ? '从任务栏移除' : '固定到任务栏'}>
+            <Button
+              size="small"
+              theme="borderless"
+              type="tertiary"
+              className="fpkm-btn-neutral"
+              icon={inDock ? <IconMinusCircle /> : <IconPlusCircle />}
+              onClick={(e) => {
+                e.stopPropagation();
+                dock.toggle(app.name);
+              }}
+            >
+              {inDock ? '移出任务栏' : '固定到任务栏'}
+            </Button>
+          </Tooltip>
+
           {app.running ? (
             <Button
               size="small"

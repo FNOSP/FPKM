@@ -78,17 +78,8 @@ export default function App() {
   const [needsSetup, setNeedsSetup] = useState(false);
   const [needLogin, setNeedLogin] = useState(false);
 
-  /**
-   * 内嵌模式：桌面的"应用商店"是桌面子窗口，iframe 指向 /?embed=store。
-   * 这样商店自带一套独立的外壳，桌面始终在窗口后面（可最小化后回到桌面），
-   * 而不是把桌面整个替换掉。
-   */
-  const [embedMode] = useState(
-    () => new URLSearchParams(window.location.search).get('embed') === 'store',
-  );
-
-  // 顶层模式：desktop=FPKM 桌面（默认）；store=应用商店
-  const [mode, setMode] = useState<'desktop' | 'store'>(embedMode ? 'store' : 'desktop');
+  // 顶层模式：desktop=FPKM 桌面（默认）；store=应用商店（全屏）
+  const [mode, setMode] = useState<'desktop' | 'store'>('desktop');
   const [view, setView] = useState<View>('home');
   // 详情页目标：已安装应用名 或 商店条目 id
   const [detailTarget, setDetailTarget] = useState<{ appname?: string; storeId?: string } | null>(null);
@@ -629,23 +620,15 @@ export default function App() {
     setView('detail');
   };
 
-  if (mode === 'desktop') {
-    return (
-      <Desktop
-        apps={apps}
-        meta={meta}
-        loading={loading}
-        onOpenStore={() => {
-          setMode('store');
-          setView('home');
-        }}
-        onStartApp={startFromDesktop}
-        onOpenDetail={openAppDetailFromDesktop}
-      />
-    );
-  }
-
-  return (
+  /**
+   * 构建商店外壳。
+   *
+   * 关键点：它同时用于两种场合 ——
+   *   1. 桌面窗口内（同一个 React 树，直接挂载，无需重新加载）；
+   *   2. 全屏模式（mode==='store'，极少用，保留兜底）。
+   * 因此抽成函数，把"返回桌面"的回调作为参数传入。
+   */
+  const buildShell = (onBackToDesktop: () => void) => (
     <div className="fpkm-shell">
       {/* ================= 侧边栏 ================= */}
       <aside className="fpkm-side">
@@ -658,19 +641,17 @@ export default function App() {
         </div>
 
         <nav className="fpkm-nav">
-          {/* 返回 FPKM 桌面（内嵌在桌面子窗口里时不显示） */}
-          {embedMode ? null : (
-            <div
-              className="fpkm-nav-item fpkm-nav-back-desktop"
-              onClick={() => {
-                blurActive();
-                setMode('desktop');
-              }}
-            >
-              <IconDesktop />
-              返回桌面
-            </div>
-          )}
+          {/* 返回 FPKM 桌面 */}
+          <div
+            className="fpkm-nav-item fpkm-nav-back-desktop"
+            onClick={() => {
+              blurActive();
+              onBackToDesktop();
+            }}
+          >
+            <IconDesktop />
+            返回桌面
+          </div>
 
           <div
             className={`fpkm-nav-item ${view === 'home' ? 'fpkm-nav-item-active' : ''}`}
@@ -1022,4 +1003,24 @@ export default function App() {
       />
     </div>
   );
+
+  // 桌面模式：商店作为桌面上的一扇窗口，**在同一个 React 树内渲染**。
+  // 早期版本用 iframe 指向 /?embed=store，导致浏览器要重新下载并执行
+  // 整个 SPA（约 800KB JS + 700KB CSS）再 boot 一次 React，所以打开很慢。
+  if (mode === 'desktop') {
+    return (
+      <Desktop
+        apps={apps}
+        meta={meta}
+        loading={loading}
+        renderStore={(closeStoreWindow) => buildShell(closeStoreWindow)}
+        onOpenStore={() => setMode('store')}
+        onStartApp={startFromDesktop}
+        onOpenDetail={openAppDetailFromDesktop}
+      />
+    );
+  }
+
+  // 全屏兜底（保留原有行为）
+  return buildShell(() => setMode('desktop'));
 }

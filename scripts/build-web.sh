@@ -55,6 +55,14 @@ if [ ! -d node_modules ]; then
   echo "    安装依赖..."
   npm install
 fi
+# 先做类型检查再打包。
+#
+# 为什么必须显式加这一步：package.json 的 build 只是 `vite build`，
+# Vite 用 esbuild 转译时**不做类型检查**，类型错误会被静默忽略并产出
+# "能跑但有 bug" 的产物。历史上有几次改动因此漏过了检查。
+echo "    类型检查 (tsc --noEmit)"
+npx tsc --noEmit
+
 npm run build
 
 echo "==> 完成：$DIST"

@@ -254,6 +254,17 @@
   background: #fff;
 }
 
+/* 内联内容（应用商店）：铺满窗口内容区 */
+.fpkm-win-inline {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.fpkm-win-inline > .fpkm-shell {
+  height: 100%;
+}
+
 .fpkm-win-iframe {
   width: 100%;
   height: 100%;
@@ -344,6 +355,18 @@
 .fpkm-dock-slot {
   display: inline-flex;
   flex-shrink: 0;
+}
+
+/* 商店图标与普通应用之间的分隔线。
+   macOS 的 Dock 也用一条细线区分"特殊入口"和"普通应用"，
+   这里同时把右侧间距加大，让分组更清晰。 */
+.fpkm-dock-sep {
+  width: 1px;
+  height: 34px;
+  flex-shrink: 0;
+  margin: 0 10px 0 8px;
+  background: rgba(160, 205, 255, 0.28);
+  border-radius: 1px;
 }
 
 /* 单个 Dock 图标（只显示图标，不显示文字） */
