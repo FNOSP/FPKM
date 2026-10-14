@@ -6,25 +6,22 @@ import type {
   MetaInfo,
 } from './types';
 
-const SESSION_KEY = 'fpkm.session';
+/**
+ * 会话令牌不再存放在 localStorage。
+ *
+ * 令牌通过 **HttpOnly Cookie** 下发，浏览器会自动携带，
+ * 因此前端无需（也不应）读取它：
+ *   - HttpOnly 意味着 JS 无法读取 → XSS 无法窃取会话；
+ *   - Cookie 不区分端口 → 统一网关 / CGI 应用（另一个端口）也能收到；
+ *   - fetch(同源) / XHR / EventSource / <img> 都会自动带上 Cookie。
+ *
+ * 保留 setSession 作为空实现，是为了兼容调用方（登录成功后的回调），
+ * 避免为了删除一个赋值而改动多处调用点。
+ */
 
-/** 读取本地保存的会话令牌 */
-export function getSession(): string {
-  try {
-    return localStorage.getItem(SESSION_KEY) ?? '';
-  } catch {
-    return '';
-  }
-}
-
-/** 保存会话令牌 */
-export function setSession(token: string): void {
-  try {
-    if (token) localStorage.setItem(SESSION_KEY, token);
-    else localStorage.removeItem(SESSION_KEY);
-  } catch {
-    /* localStorage 不可用时忽略 */
-  }
+/** 兼容旧调用：令牌已由服务端通过 HttpOnly Cookie 下发，此处无需保存 */
+export function setSession(_token: string): void {
+  /* 有意留空：令牌由 Cookie 承载 */
 }
 
 /** 401 时的回调，由 App 注入以弹出登录框 */
@@ -44,8 +41,7 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  const token = getSession();
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  // 会话由 HttpOnly Cookie 自动携带（同源 fetch 默认 credentials: same-origin）
   if (init.body && !(init.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
   }
@@ -97,10 +93,7 @@ export interface AuthStatus {
 }
 
 export function authStatus(): Promise<AuthStatus> {
-  const headers = new Headers();
-  const token = getSession();
-  if (token) headers.set('Authorization', `Bearer ${token}`);
-  return fetch('/api/auth/status', { headers }).then(async (r) => {
+  return fetch('/api/auth/status').then(async (r) => {
     if (!r.ok) throw new ApiError(r.status, '无法获取认证状态');
     return r.json();
   });
@@ -211,8 +204,7 @@ export function uploadAndInstall(
 
   const done = new Promise<{ taskId: string }>((resolve, reject) => {
     xhr.open('POST', '/api/install/upload');
-    const token = getSession();
-    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    // 同源 XHR 会自动携带会话 Cookie
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress((e.loaded / e.total) * 100, e.loaded, e.total);
@@ -263,9 +255,8 @@ export interface TaskStreamHandlers {
 }
 
 export function streamTask(taskId: string, handlers: TaskStreamHandlers): () => void {
-  const token = getSession();
-  const qs = token ? `?session=${encodeURIComponent(token)}` : '';
-  const es = new EventSource(`/api/tasks/${encodeURIComponent(taskId)}/stream${qs}`);
+  // 同源 EventSource 会自动携带会话 Cookie
+  const es = new EventSource(`/api/tasks/${encodeURIComponent(taskId)}/stream`);
   let closed = false;
 
   const close = () => {
@@ -338,11 +329,9 @@ export function deleteSource(id: string): Promise<{ sources: import('./types').A
   return request(`/api/store/sources/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
-/** 应用图标地址（会话通过查询参数传递，便于 <img> 直接加载） */
+/** 应用图标地址（会话由 Cookie 自动携带，<img> 同源请求即可） */
 export function iconURL(key: string): string {
-  const token = getSession();
-  const qs = token ? `?session=${encodeURIComponent(token)}` : '';
-  return `/api/icons/${encodeURIComponent(key)}${qs}`;
+  return `/api/icons/${encodeURIComponent(key)}`;
 }
 
 // ---------- 向导 ----------

@@ -50,6 +50,7 @@ import {
   saveSource,
   deleteSource,
   streamTask,
+  logout,
 } from './api/client';
 
 import AppCard from './components/AppCard';
@@ -806,8 +807,15 @@ export default function App() {
                 type="tertiary"
                 aria-label="退出登录"
                 onClick={() => {
-                  setSession('');
-                  setNeedLogin(true);
+                  // 必须调用服务端注销：令牌由 HttpOnly Cookie 承载，
+                  // 前端无法清除，且服务端需要将其写入吊销列表
+                  // （否则该令牌在网关侧仍然有效直到自然过期）。
+                  void logout()
+                    .catch(() => undefined)
+                    .finally(() => {
+                      setSession('');
+                      setNeedLogin(true);
+                    });
                 }}
               />
             </Tooltip>

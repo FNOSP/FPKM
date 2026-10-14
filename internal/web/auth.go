@@ -44,13 +44,15 @@ const (
 	loginMaxLockout  = 5 * time.Minute
 )
 
-// AuthManager 负责密码的设置、校验与登录限速
+// AuthManager 负责密码的设置、校验与登录限速。
+//
+// 会话令牌不在这里管理：令牌需要在 Web 与网关两个进程间共享校验，
+// 因此统一由 internal/session（HMAC 签名 + 共享密钥）负责。
 type AuthManager struct {
 	path string
 
-	mu       sync.Mutex
-	locked   map[string]*loginAttempt
-	sessions map[string]time.Time
+	mu     sync.Mutex
+	locked map[string]*loginAttempt
 }
 
 type loginAttempt struct {
@@ -61,9 +63,8 @@ type loginAttempt struct {
 // NewAuthManager 创建密码管理器，path 为密码记录文件路径
 func NewAuthManager(path string) *AuthManager {
 	return &AuthManager{
-		path:     path,
-		locked:   map[string]*loginAttempt{},
-		sessions: map[string]time.Time{},
+		path:   path,
+		locked: map[string]*loginAttempt{},
 	}
 }
 
@@ -151,10 +152,9 @@ func (a *AuthManager) SetPassword(oldPwd, newPwd string) error {
 		return fmt.Errorf("保存密码失败: %w", err)
 	}
 
-	// 改密后使所有旧会话失效
-	a.mu.Lock()
-	a.sessions = map[string]time.Time{}
-	a.mu.Unlock()
+	// 注意：改密后需要让所有已签发令牌失效，这一步由调用方
+	// 通过 session.Store.RevokeAll()（轮换签名密钥）完成 ——
+	// 令牌是无状态签名，本管理器无法枚举它们。
 
 	return nil
 }
@@ -232,50 +232,6 @@ func (a *AuthManager) verifyRecord(rec *PasswordRecord, pwd string) (bool, error
 	}
 	return subtle.ConstantTimeCompare(derived, want) == 1, nil
 }
-
-// ---------- 会话 ----------
-
-// NewSession 登录成功后创建会话令牌
-func (a *AuthManager) NewSession() (string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	token := base64.RawURLEncoding.EncodeToString(buf)
-
-	a.mu.Lock()
-	a.sessions[token] = time.Now().Add(sessionTTL)
-	a.mu.Unlock()
-	return token, nil
-}
-
-// ValidSession 校验会话令牌
-func (a *AuthManager) ValidSession(token string) bool {
-	if token == "" {
-		return false
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	exp, ok := a.sessions[token]
-	if !ok {
-		return false
-	}
-	if time.Now().After(exp) {
-		delete(a.sessions, token)
-		return false
-	}
-	return true
-}
-
-// DropSession 注销会话
-func (a *AuthManager) DropSession(token string) {
-	a.mu.Lock()
-	delete(a.sessions, token)
-	a.mu.Unlock()
-}
-
-// sessionTTL 会话有效期
-const sessionTTL = 7 * 24 * time.Hour
 
 // validatePassword 密码强度校验
 func validatePassword(pwd string) error {

@@ -16,6 +16,7 @@ import (
 	"fpkm/internal/app"
 	"fpkm/internal/config"
 	"fpkm/internal/logger"
+	"fpkm/internal/session"
 )
 
 // Options Web 服务启动参数
@@ -44,10 +45,20 @@ type Server struct {
 	auth      *AuthManager
 	catalog   *Catalog
 	icons     *iconCache
+	// sessions 跨进程共享的会话存储。网关进程也读同一份密钥，
+	// 因此统一网关 / CGI 应用能独立校验 FPKM 的登录态。
+	sessions *session.Store
 }
 
 // NewServer 创建 Web 服务
 func NewServer(cfg *config.Config, opts Options) *Server {
+	sessions, err := session.New(cfg.BaseDir)
+	if err != nil {
+		// 会话存储不可用会导致任何人都无法登录，属于致命配置问题，
+		// 但要给出明确原因而不是静默降级成"无鉴权"。
+		logger.Error("初始化会话存储失败: %v", err)
+		sessions, _ = session.New(os.TempDir())
+	}
 	return &Server{
 		cfg:       cfg,
 		mgr:       app.NewManager(cfg),
@@ -57,6 +68,7 @@ func NewServer(cfg *config.Config, opts Options) *Server {
 		auth:      NewAuthManager(filepath.Join(cfg.BaseDir, "password.json")),
 		catalog:   NewCatalog(NewSourceStore(cfg)),
 		icons:     newIconCache(cfg),
+		sessions:  sessions,
 	}
 }
 
@@ -122,7 +134,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			writeJSONError(w, http.StatusUnauthorized, "尚未设置管理密码")
 			return
 		}
-		if !s.auth.ValidSession(extractSession(r)) {
+		if !s.ValidSession(r) {
 			writeJSONError(w, http.StatusUnauthorized, "登录已失效，请重新登录")
 			return
 		}
@@ -130,7 +142,20 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 	})
 }
 
-// extractSession 从请求中提取会话令牌
+// sessionCookieName 会话 Cookie 名。
+//
+// 为什么必须用 Cookie：桌面用 iframe 打开统一网关 / CGI 应用时，
+// 浏览器请求的是**另一个端口**（如 :7666）。Header 无法跨文档传递，
+// 而 Cookie **不区分端口**（只按域名与路径匹配），
+// 因此 :8080 登录后设置的 Cookie 会被 :7666 的请求一并携带 ——
+// 这正是让网关能识别 FPKM 登录态的桥梁。
+const sessionCookieName = "fpkm_session"
+
+// extractSession 从请求中提取会话令牌。优先级：
+//  1. Authorization: Bearer（API 调用）
+//  2. X-FPKM-Session 头
+//  3. Cookie（浏览器访问网关/应用时的主要方式）
+//  4. ?session= 查询参数（兼容旧链接）
 func extractSession(r *http.Request) string {
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
@@ -138,7 +163,52 @@ func extractSession(r *http.Request) string {
 	if h := r.Header.Get("X-FPKM-Session"); h != "" {
 		return strings.TrimSpace(h)
 	}
+	if c, err := r.Cookie(sessionCookieName); err == nil && c.Value != "" {
+		return c.Value
+	}
 	return r.URL.Query().Get("session")
+}
+
+// ValidSession 校验请求携带的会话令牌
+func (s *Server) ValidSession(r *http.Request) bool {
+	if s.sessions == nil {
+		return false
+	}
+	return s.sessions.Verify(extractSession(r))
+}
+
+// setSessionCookie 下发会话 Cookie。
+//
+// 不设 HttpOnly 的原因：前端需要在 localStorage 之外也能读取？—— 并不需要。
+// 这里**设置 HttpOnly**，令牌只走 Cookie，避免 XSS 窃取；
+// 前端的 fetch 依赖同源自动携带 Cookie（credentials 默认 same-origin）。
+//
+// SameSite=Lax：既允许跨端口（同站点）携带，又能防御大部分 CSRF。
+func setSessionCookie(w http.ResponseWriter, r *http.Request, token string, exp time.Time) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    token,
+		Path:     "/",
+		Expires:  exp,
+		MaxAge:   int(time.Until(exp).Seconds()),
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		// Secure 仅在 HTTPS 下设置；本服务默认 HTTP，
+		// 若置 true 会导致 Cookie 根本不被发送。
+		Secure: r.TLS != nil,
+	})
+}
+
+// clearSessionCookie 清除会话 Cookie（登出）
+func clearSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
 }
 
 // clientKey 用于登录限速的来源标识
@@ -197,7 +267,7 @@ func path(p string) string {
 //   - authenticated=true → 已有有效会话，可直接进主界面
 func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	hasPwd := s.auth.HasPassword()
-	authed := hasPwd && s.auth.ValidSession(extractSession(r))
+	authed := hasPwd && s.ValidSession(r)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"needsSetup":    !hasPwd,
 		"hasPassword":   hasPwd,
@@ -236,13 +306,14 @@ func (s *Server) handleAuthSetup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 设置成功后直接登录，省去再输一次
-	session, err := s.auth.NewSession()
+	token, exp, err := s.sessions.Issue()
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "创建会话失败: "+err.Error())
 		return
 	}
+	setSessionCookie(w, r, token, exp)
 	logger.Info("已设置管理密码，来源 %s", clientKey(r))
-	writeJSON(w, http.StatusOK, map[string]any{"session": session})
+	writeJSON(w, http.StatusOK, map[string]any{"session": token})
 }
 
 // handleAuthLogin 使用管理密码登录
@@ -271,18 +342,25 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := s.auth.NewSession()
+	token, exp, err := s.sessions.Issue()
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "创建会话失败: "+err.Error())
 		return
 	}
+	// 同时下发 Cookie：网关与 CGI 应用在**另一个端口**上，
+	// 只能靠 Cookie（不区分端口）识别 FPKM 登录态。
+	setSessionCookie(w, r, token, exp)
 	logger.Info("登录成功（来源 %s）", key)
-	writeJSON(w, http.StatusOK, map[string]any{"session": session})
+	writeJSON(w, http.StatusOK, map[string]any{"session": token})
 }
 
 // handleAuthLogout 注销当前会话
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
-	s.auth.DropSession(extractSession(r))
+	// 吊销令牌（写入共享吊销列表，网关也会立刻拒绝该令牌）
+	if tok := extractSession(r); tok != "" {
+		s.sessions.Revoke(tok)
+	}
+	clearSessionCookie(w)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -292,7 +370,7 @@ func (s *Server) handleAuthChange(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "仅支持 POST")
 		return
 	}
-	if !s.auth.ValidSession(extractSession(r)) {
+	if !s.ValidSession(r) {
 		writeJSONError(w, http.StatusUnauthorized, "请先登录")
 		return
 	}
@@ -315,14 +393,19 @@ func (s *Server) handleAuthChange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 改密后旧会话已失效，直接下发新会话
-	session, err := s.auth.NewSession()
+	// 改密后让**所有**已签发令牌失效（轮换签名密钥），
+	// 然后给当前操作者下发一个新令牌。
+	if err := s.sessions.RevokeAll(); err != nil {
+		logger.Warn("轮换会话密钥失败: %v", err)
+	}
+	token, exp, err := s.sessions.Issue()
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "创建会话失败: "+err.Error())
 		return
 	}
-	logger.Info("管理密码已修改")
-	writeJSON(w, http.StatusOK, map[string]any{"session": session})
+	setSessionCookie(w, r, token, exp)
+	logger.Info("管理密码已修改，所有旧会话已失效")
+	writeJSON(w, http.StatusOK, map[string]any{"session": token})
 }
 
 func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {

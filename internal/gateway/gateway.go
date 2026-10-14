@@ -20,6 +20,7 @@ import (
 
 	"fpkm/internal/config"
 	"fpkm/internal/logger"
+	"fpkm/internal/session"
 )
 
 // DefaultPort 默认网关端口
@@ -52,18 +53,36 @@ type Gateway struct {
 	mu     sync.RWMutex
 	routes map[string]*Route // prefix -> Route
 	server *http.Server
+
+	// sessions 与 Web 进程共享的会话存储（同一份 HMAC 密钥文件）。
+	// 网关据此**独立**校验 FPKM 登录态，无需回调 Web 进程。
+	sessions *session.Store
+	// gate 是否启用登录校验（关掉时行为与升级前一致）
+	gate bool
 }
 
-// New 创建网关实例
+// New 创建网关实例。
+//
+// 会同时加载与 Web 进程共享的会话密钥，用于校验 FPKM 登录态；
+// 这样统一网关与 CGI 应用只有登录 FPKM 后才能访问。
 func New(cfg *config.Config, port int) *Gateway {
 	if port <= 0 {
 		port = DefaultPort
 	}
-	return &Gateway{
+	g := &Gateway{
 		cfg:    cfg,
 		port:   port,
 		routes: make(map[string]*Route),
+		gate:   true,
 	}
+	// 密钥读取失败不阻断网关启动（可能是权限问题），
+	// 但此时 gate 会自动失效并在日志中明确告警 —— 绝不静默放行。
+	if st, err := session.New(cfg.BaseDir); err == nil {
+		g.sessions = st
+	} else {
+		logger.Error("网关加载会话密钥失败，将无法校验登录态: %v", err)
+	}
+	return g
 }
 
 // AddRoute 添加路由
@@ -139,8 +158,11 @@ func (g *Gateway) GetRoutes() []*Route {
 func (g *Gateway) Start() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", g.handleRequest)
-	mux.HandleFunc("/__gateway__/routes", g.handleRoutesAPI)
-	mux.HandleFunc("/__gateway__/status", g.handleStatus)
+	// 管理接口仅允许本机访问（见 localOnly）：
+	// /__gateway__/routes 支持 POST 添加路由，若对外开放，
+	// 任何人都能把任意路径指向任意 socket，属于提权风险。
+	mux.HandleFunc("/__gateway__/routes", localOnly(g.handleRoutesAPI))
+	mux.HandleFunc("/__gateway__/status", localOnly(g.handleStatus))
 
 	g.server = &http.Server{
 		Addr:    fmt.Sprintf(":%d", g.port),
@@ -216,6 +238,17 @@ func (g *Gateway) handleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Info("[GATEWAY] 匹配路由: %s -> %s (socket: %s, protocol: %s)", matched.Prefix, matched.AppName, matched.Socket, matched.Protocol)
+
+	// 登录校验（与飞牛一致：网关 / CGI 应用必须登录后才能访问）。
+	//
+	// 必须在任何代理/执行动作**之前**拦截，否则未登录用户依然
+	// 能透过网关读取应用数据，甚至触发 CGI 产生副作用。
+	if !g.authorized(r) {
+		logger.Warn("[GATEWAY] <-- %s 401 未登录 (app=%s, from %s)",
+			r.URL.Path, matched.AppName, r.RemoteAddr)
+		g.writeLoginRequired(w, r)
+		return
+	}
 
 	// CGI 路由：直接执行 CGI 二进制（不需要 socket 检查）
 	if matched.Protocol == "cgi" {
@@ -808,6 +841,168 @@ func (g *Gateway) proxyCGI(w http.ResponseWriter, r *http.Request, route *Route)
 }
 
 // isWebSocketRequest 检查是否是 WebSocket 升级请求
+// localOnly 限制处理器只能被本机访问。
+//
+// 网关的管理接口（查看/添加路由、状态）不需要登录，但绝不能暴露到
+// 局域网：POST /__gateway__/routes 可以直接改写路由表。
+func localOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !isLoopback(r.RemoteAddr) {
+			http.Error(w, "该接口仅允许本机访问", http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
+}
+
+// isLoopback 判断来源地址是否为本机
+func isLoopback(remoteAddr string) bool {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
+}
+
+// ---------- 登录校验 ----------
+
+// sessionCookieName 会话 Cookie 名（必须与 internal/web 保持一致）
+const sessionCookieName = "fpkm_session"
+
+// authorized 判断请求是否携带有效的 FPKM 登录令牌。
+//
+// 令牌来源（与 Web 端一致）：
+//  1. Cookie（浏览器访问时的主要方式 —— Cookie 不区分端口，
+//     因此 :8080 登录后 :7666 的请求也会带上）；
+//  2. Authorization: Bearer（API / 命令行）；
+//  3. X-FPKM-Session 头；
+//  4. ?session= 查询参数（兼容旧链接）。
+func (g *Gateway) authorized(r *http.Request) bool {
+	// 未启用门禁（或密钥不可用）时，为避免"静默放行"，
+	// 这里返回 false 并已在 New 中记录错误日志。
+	if !g.gate || g.sessions == nil {
+		return false
+	}
+	return g.sessions.Verify(extractToken(r))
+}
+
+// extractToken 从请求中提取会话令牌
+func extractToken(r *http.Request) string {
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		return strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
+	}
+	if h := r.Header.Get("X-FPKM-Session"); h != "" {
+		return strings.TrimSpace(h)
+	}
+	if c, err := r.Cookie(sessionCookieName); err == nil && c.Value != "" {
+		return c.Value
+	}
+	return r.URL.Query().Get("session")
+}
+
+// writeLoginRequired 返回"需要登录"提示。
+//
+// 浏览器直接访问时给出可点击的引导页（而不是干巴巴的 401 文本），
+// 因为用户是在桌面里点开应用，看到一页错误会不知所措。
+// 非 HTML 请求（fetch/XHR/WebSocket 握手等）仍返回标准 401，
+// 便于前端代码判断并跳转登录。
+func (g *Gateway) writeLoginRequired(w http.ResponseWriter, r *http.Request) {
+	if !wantsHTML(r) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"未登录或登录已失效，请先在 FPKM 应用商店登录"}`))
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusUnauthorized)
+	_, _ = io.WriteString(w, loginRequiredPage)
+}
+
+// wantsHTML 判断请求是否期望 HTML 响应
+func wantsHTML(r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		return false
+	}
+	// WebSocket / fetch 等按非 HTML 处理
+	if isWebSocketRequest(r) {
+		return false
+	}
+	if strings.Contains(r.Header.Get("Accept"), "text/html") {
+		return true
+	}
+	// Accept 缺失时的兜底：导航请求通常带 Sec-Fetch-Mode: navigate
+	if r.Header.Get("Sec-Fetch-Mode") == "navigate" {
+		return true
+	}
+	// 目录式路径（以 / 结尾）通常是页面导航
+	return strings.HasSuffix(r.URL.Path, "/")
+}
+
+// loginRequiredPage 未登录时的引导页。
+//
+// 说明：这里刻意不自动跳转到 FPKM 首页 —— 桌面用 iframe 打开应用，
+// iframe 内跳转会让用户困在窗口里。改为给出明确提示与"重新登录"链接，
+// 链接 target="_top" 让整个页面跳转，而不是在 iframe 内打转。
+const loginRequiredPage = `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>需要登录 · FPKM</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(900px 600px at 50% 20%, #16233a, #0b1220 70%);
+    color: #e6edf7;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+                 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  }
+  .card {
+    width: min(420px, calc(100vw - 48px));
+    padding: 32px 28px;
+    border-radius: 16px;
+    text-align: center;
+    background: rgba(22, 32, 50, .55);
+    backdrop-filter: blur(18px) saturate(160%);
+    border: 1px solid rgba(160, 205, 255, .22);
+    box-shadow: 0 18px 48px rgba(0,0,0,.5);
+  }
+  .icon { margin-bottom: 16px; color: #7dd3fc; }
+  .icon svg { width: 44px; height: 44px; display: block; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 0 0 10px; font-weight: 600; }
+  p { font-size: 13.5px; line-height: 1.7; color: #a9bad2; margin: 0 0 22px; }
+  a {
+    display: inline-block; padding: 10px 22px; border-radius: 10px;
+    background: #2b6cff; color: #fff; text-decoration: none;
+    font-size: 14px; font-weight: 600;
+  }
+  a:hover { background: #1f5be0; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon" aria-hidden="true">
+      <!-- 用内联 SVG 而不是 emoji：emoji 依赖系统字体，
+           在缺少 emoji 字体的环境（如部分 NAS 精简系统）会渲染成豆腐块 -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+           stroke-linecap="round" stroke-linejoin="round">
+        <rect x="4" y="10.5" width="16" height="10.5" rx="2.4"></rect>
+        <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"></path>
+        <circle cx="12" cy="15.6" r="1.3" fill="currentColor" stroke="none"></circle>
+      </svg>
+    </div>
+    <h1>需要先登录 FPKM</h1>
+    <p>该应用通过 FPKM 统一网关访问，需要登录后才能使用。<br>登录后回到桌面重新打开即可。</p>
+    <a href="/" target="_top">前往登录</a>
+  </div>
+</body>
+</html>`
+
 func isWebSocketRequest(r *http.Request) bool {
 	return strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
 }

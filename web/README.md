@@ -165,6 +165,105 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.64 统一网关 / CGI 应用需要登录 FPKM 才能访问
+
+与飞牛保持一致：统一网关与 CGI 应用**必须登录后才能访问**。
+
+#### 难点：网关是独立进程
+
+`fpkm web` 与 `fpkm gateway --run` 是**两个进程**，而原会话表是 Web 进程的
+**内存态**（`AuthManager.sessions`），网关根本读不到。同时原鉴权只认
+Header / query，**没有 Cookie** —— 桌面用 iframe 打开应用时请求的是
+另一个端口，Header 无法跨文档传递，等于完全没有凭证。
+
+#### 方案：HMAC 签名的自包含令牌 + 共享密钥
+
+新增 `internal/session`：令牌不再依赖任何进程的内存，而是
+**可独立校验的签名串**：
+
+```
+<payload>.<signature>
+payload = {"e":<过期时间>,"i":"<随机id>"}
+signature = base64url(HMAC-SHA256(secret, payload))
+```
+
+- 密钥存放在 `$BaseDir/session.key`（**0600**），两个进程读取同一份；
+- 网关本地验签，无需回调 Web 进程；
+- 比较用 `subtle.ConstantTimeCompare`，避免时序侧信道。
+
+#### Cookie 是跨端口的关键
+
+`Cookie` **不区分端口**（只按域名/路径匹配），因此 `:8080` 登录后下发的
+Cookie 会被 `:7666` 的请求一并携带。登录/设置密码时下发：
+
+```
+Set-Cookie: fpkm_session=<token>; Path=/; HttpOnly; SameSite=Lax
+```
+
+`HttpOnly` 防 XSS 窃取；`SameSite=Lax` 跨端口可用同时防御大部分 CSRF；
+`Secure` 仅在 HTTPS 下置位（本服务默认 HTTP，置位会导致 Cookie 不被发送）。
+
+令牌来源优先级：`Authorization: Bearer` → `X-FPKM-Session` →
+**Cookie** → `?session=`。
+
+#### 拦截点
+
+鉴权门插在**路由匹配之后、任何代理/执行动作之前**，因此
+HTTP / FastCGI / CGI / WebSocket 四条转发路径全部覆盖。
+CGI 尤其重要：它会产生副作用，未登录绝不能执行。
+
+未登录时的响应按请求类型区分：
+
+| 请求类型 | 响应 |
+|----------|------|
+| 浏览器导航（`Accept: text/html`） | 401 + 引导页（含「前往登录」，`target="_top"` 避免在 iframe 内打转） |
+| 接口调用（fetch/XHR） | 401 + JSON |
+| 非 GET | 不返回 HTML 引导页 |
+
+> 引导页的锁图标用**内联 SVG** 而非 emoji：emoji 依赖系统字体，
+> 在缺少 emoji 字体的精简系统上会渲染成豆腐块（实测已复现）。
+
+#### 顺带修掉的两个安全问题
+
+1. **`/__gateway__/*` 管理接口原先无任何限制**。其中
+   `POST /__gateway__/routes` 可以任意改写路由表（把任意路径指向任意
+   socket），属于提权风险。现已用 `localOnly` 限制为**仅本机**可访问。
+2. **登出后网关仍放行**（实测发现的真实缺陷）。早期实现只在启动时读一次
+   吊销列表，于是 Web 进程登出后网关继续返回 200 并泄露应用内容，
+   直到网关重启。现在每次校验都重新读取吊销文件，登出**立刻生效**。
+
+其余保障：改密后调用 `RevokeAll()` **轮换签名密钥**，所有旧令牌同时失效；
+若会话存储不可用，网关选择**拒绝**而不是静默放行。
+
+#### 前端改为完全依赖 Cookie
+
+令牌由 HttpOnly Cookie 承载后，前端**不再把令牌写进 localStorage**，
+也不再用 `Authorization` 头（`src/api/client.ts`）：
+
+- `fetch`（同源默认 `credentials: same-origin`）、`XHR`、`EventSource`、
+  `<img src>` 都会自动携带 Cookie，因此无需手工附加；
+- 移除 `?session=` 查询参数（原先贴在图标 URL 与 SSE 上）；
+- `setSession()` 保留为空实现，仅为兼容既有调用点。
+
+> **这修正了先前的一处不实描述**：早先文档写了"HttpOnly 防 XSS 窃取"，
+> 但当时前端仍把同一个令牌存在 localStorage 里 —— JS 照样读得到，
+> 该说法并不成立。现在 localStorage 中不再有令牌，这句才真正成立。
+> 实测：0 个请求携带 `Authorization` 头，0 个 401，图标与商店数据均正常。
+
+#### 顺带修复：退出登录失效
+
+把 `setSession()` 改成空实现后，退出按钮（只做 `setSession('')`）变成**空操作** ——
+点击后服务端会话依然有效（实测 `/api/apps` 仍返回 200）。已改为调用
+`logout()` 接口，由服务端吊销令牌并清除 Cookie。
+
+> 注意：退出入口目前在**商店界面**（桌面 → 打开应用商店窗口 → 右上角退出）。
+> 桌面任务栏本身尚无退出按钮。
+
+#### 部署前提
+
+两个进程需**同一用户**运行（相同 `HOME` → 相同 `$BaseDir`），
+否则读不到同一份密钥。当前部署中两者均为 root，满足该条件。
+
 ### 0.63 桌面壁纸换成图片
 
 壁纸改为用户提供的科幻场景图（机甲 + 云海城市），放在
