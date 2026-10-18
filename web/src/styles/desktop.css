@@ -345,6 +345,29 @@
   background: rgba(255, 255, 255, 0.92);
 }
 
+/* ------------------------------------------------------------------
+   Semino Spin 的 tip 文案宽度限制（修复"正在打开应用…"竖排）
+
+   Semi 的 DOM 结构是：
+     .semi-spin
+       └ .semi-spin-wrapper
+           ├ svg                    （图标）
+           └ div（无 class）        （提示文字）
+       └ .semi-spin-children        （内容包一层，本处为空）
+
+   文字所在的那个 div 是 wrapper 的行内子元素，而 wrapper 的宽度
+   由 spinner 自身决定（.semi-spin-large 约 32px）。于是文案被压成
+   32px 宽、逐字折行（实测 32x84，竖成一列）。
+
+   修法：让 wrapper 内的文字 div 按内容自然宽度排布，并且不换行。
+   这里用 `> div` 精确指向该节点，避免影响 Spin 的其它使用场景。
+   ------------------------------------------------------------------ */
+.fpkm-win-loading .semi-spin-wrapper > div {
+  width: auto;
+  max-width: none;
+  white-space: nowrap;
+}
+
 .fpkm-win-failed {
   position: absolute;
   inset: 0;

@@ -165,6 +165,50 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.72 修复「正在打开应用…」被压成竖排
+
+**现象**：打开应用子窗口时，加载提示竖着排成一列：
+
+```
+正
+在
+打
+开
+应
+用…
+```
+
+**原因**：Semi `Spin` 的 DOM 结构是
+
+```
+.semi-spin
+  └ .semi-spin-wrapper
+      ├ svg                 （图标）
+      └ div（无 class）     （tip 文案）
+  └ .semi-spin-children
+```
+
+文案是 `wrapper` 的普通子元素，而 `wrapper` 的宽度由 spinner 自身决定
+（`.semi-spin-large` 约 32px）。于是文字被压成 **32px 宽、逐字折行**
+（实测 32×84）。
+
+**修法**：让 `wrapper` 里的文案按内容自然排布、且不换行。
+用 `> div` 精确指向该节点，避免影响项目里其它 `Spin` 用法：
+
+```css
+.fpkm-win-loading .semi-spin-wrapper > div {
+  width: auto;
+  max-width: none;
+  white-space: nowrap;
+}
+```
+
+修复后实测 32×21（单行）。
+
+> 中间踩过一个坑：一开始改的是 `.semi-spin { display:flex }`，
+> 结果文案宽度变成 0（`wrapper` 不是 flex 容器，改成 flex 反而
+> 让内部 block 元素失去宽度）。定位到真实 DOM 结构后才改对。
+
 ### 0.71 图标文字去背景 / 商店窗口更宽 / 窗口几何持久化 / 新窗口级联
 
 #### 1. 桌面图标文字不加背景色
