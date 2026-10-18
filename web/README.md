@@ -165,6 +165,55 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.66 壁纸统一 + 修复多窗口拖动卡顿/粘连
+
+#### 1. 登录页也使用桌面壁纸
+
+`.fpkm-login-wrap` 复用同一张 `/wallpaper.webp`（`image-set`），
+并叠一层暗色薄纱保证表单可读 —— 这张壁纸天空偏亮，
+不压暗的话白色卡片与浅色文字会糊在一起。卡片通过 `z-index:1` 浮在薄纱之上。
+
+#### 2. 拖动卡顿与"松手后仍跟随"
+
+这是**两个独立缺陷**：
+
+**缺陷 A：松手后窗口继续跟随鼠标**
+
+`pointerup` 监听在 `window` 上，但鼠标拖过窗口内的 `<iframe>` 时，
+事件进入 iframe 的**独立文档**，父窗口收不到 `pointerup` ——
+`dragRef` 永不清空，于是窗口一直跟着鼠标。
+
+三重保障：
+
+1. `setPointerCapture(pointerId)`：把指针事件锁定到拖动的标题栏元素；
+2. 拖动/缩放期间在 iframe 上覆盖透明遮罩 `.fpkm-win-dragshield`，
+   把指针事件留在父窗口；
+3. 同时监听 `pointercancel` 与 `window.blur`，失焦也结束拖动。
+
+**缺陷 B：拖动卡顿**
+
+原先每次 `pointermove` 都调用 `onMove` → `Desktop` 的 `setWindows`，
+触发整个桌面重渲染；而商店窗口的 `inlineContent` 是每次渲染重新构建的
+**整棵商店组件树**，等于每帧重建一次大型子树，窗口一多就明显掉帧。
+
+改为拖动期间**完全不触发 React**：
+
+```ts
+// 只改窗口自身的 style，走合成层，不触发 layout / React 渲染
+el.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
+// 松手时一次性提交最终几何
+onMove(liveRef.current)
+```
+
+另外用 `memo` 包裹 `AppWindowFrame`，避免拖动一个窗口时
+其它窗口跟着重渲染。
+
+实测（两个窗口，其中一个含大型商店子树）：
+
+- 拖动期间 40 步 DOM 变更 **42 次**（仅窗口自身 transform/style）；
+- 松手后位置稳定，不再跟随鼠标；
+- 在 iframe 区域上方松手也不会"粘住"。
+
 ### 0.65 统一端口：Web 界面与网关共用 7666
 
 此前是两个进程、两个端口：

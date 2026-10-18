@@ -320,6 +320,17 @@
   background: #fff;
 }
 
+/* 拖动/缩放时覆盖在 iframe 上的透明遮罩。
+   作用：把指针事件留在父窗口，避免鼠标划过 iframe 时
+   事件进入其独立文档导致拖动卡顿或收不到 pointerup。 */
+.fpkm-win-dragshield {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  background: transparent;
+  cursor: grabbing;
+}
+
 /* 八向缩放手柄 */
 .fpkm-win-resize {
   position: absolute;

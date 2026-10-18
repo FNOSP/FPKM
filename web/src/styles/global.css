@@ -274,12 +274,46 @@ body {
 }
 
 /* ---------- 登录页 ---------- */
+
+/* 登录页也用桌面壁纸，保持视觉统一。
+   壁纸资源与桌面共用 /wallpaper.webp（image-set 让浏览器挑格式），
+   叠加一层暗色薄纱保证表单可读性 —— 这张壁纸天空偏亮，
+   不压暗的话白色卡片边缘与浅色文字会糊在一起。 */
 .fpkm-login-wrap {
   height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
+  background-color: #0b1220;
+  background-image: image-set(
+    url('/wallpaper.webp') type('image/webp'),
+    url('/wallpaper.jpg') type('image/jpeg')
+  );
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  position: relative;
+}
+
+/* 暗色薄纱（独立伪元素，避免干扰 image-set） */
+.fpkm-login-wrap::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgba(6, 12, 24, 0.45) 0%,
+    rgba(6, 12, 24, 0.3) 45%,
+    rgba(6, 12, 24, 0.55) 100%
+  );
+}
+
+/* 卡片浮在薄纱之上，并加强阴影让它在图片背景上更清晰 */
+.fpkm-login-wrap > * {
+  position: relative;
+  z-index: 1;
 }
 
 .fpkm-login-card {

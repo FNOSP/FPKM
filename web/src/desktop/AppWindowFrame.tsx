@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Button, Spin, Tooltip, Typography } from '@douyinfe/semi-ui';
 import {
   IconMinus,
@@ -60,7 +60,7 @@ const MIN_W = 380;
 const MIN_H = 260;
 
 /** 可拖动、可缩放的 iframe 子窗口（参考飞牛桌面的应用窗口） */
-export default function AppWindowFrame({
+function AppWindowFrameInner({
   win,
   active,
   onFocus,
@@ -78,17 +78,42 @@ export default function AppWindowFrame({
   const dragRef = useRef<{ dx: number; dy: number } | null>(null);
   const resizeRef = useRef<{ startX: number; startY: number; rect: WindowRect; dir: string } | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  /** 窗口根元素：拖动/缩放时直接改它的 style，绕过 React 重渲染 */
+  const boxRef = useRef<HTMLDivElement>(null);
+  /** 拖动/缩放过程中的实时几何，松手时一次性提交 */
+  const liveRef = useRef<WindowRect | null>(null);
 
-  /** 指针移动：拖动或缩放 */
+  /**
+   * 指针移动：拖动或缩放。
+   *
+   * 性能要点（修复"拖动卡顿"）：
+   * 直接用 ref 改 DOM 的 transform / width·height，**不调用 setState**。
+   *
+   * 之前每次 pointermove 都走 onMove → Desktop 的 setWindows →
+   * 整个桌面重渲染；而商店窗口的 inlineContent 是每次渲染重新构建的
+   * 整棵组件树（Desktop.tsx 的 renderStore），等于每帧重建一次大型子树，
+   * 窗口一多就明显掉帧。
+   *
+   * 现在拖动过程中只做两件廉价操作：
+   *   - 改 transform（合成层，不触发 layout 重排）；
+   *   - 缩放时改 width/height（只影响该窗口自身）。
+   * 松手时才把最终几何提交给 React（onMove 一次）。
+   */
   const onPointerMove = useCallback(
     (e: PointerEvent) => {
-      if (dragRef.current) {
-        const { dx, dy } = dragRef.current;
-        const nx = Math.min(Math.max(0, e.clientX - dx), Math.max(0, bounds.w - win.rect.w));
-        const ny = Math.min(Math.max(0, e.clientY - dy), Math.max(0, bounds.h - win.rect.h));
-        onMove({ ...win.rect, x: nx, y: ny });
+      const el = boxRef.current;
+      if (!el) return;
+
+      const d = dragRef.current;
+      if (d) {
+        const nx = Math.min(Math.max(0, e.clientX - d.dx), Math.max(0, bounds.w - win.rect.w));
+        const ny = Math.min(Math.max(0, e.clientY - d.dy), Math.max(0, bounds.h - win.rect.h));
+        liveRef.current = { ...win.rect, x: nx, y: ny };
+        // 用 translate 表现位移，避免 left/top 触发重排
+        el.style.transform = `translate3d(${nx - win.rect.x}px, ${ny - win.rect.y}px, 0)`;
         return;
       }
+
       const r = resizeRef.current;
       if (r) {
         const ddx = e.clientX - r.startX;
@@ -107,42 +132,93 @@ export default function AppWindowFrame({
           y = r.rect.y + (r.rect.h - nh);
           h = nh;
         }
-        // 不越出桌面
         w = Math.min(w, bounds.w - x);
         h = Math.min(h, bounds.h - y);
-        onMove({ x, y, w, h });
+
+        liveRef.current = { x, y, w, h };
+        el.style.transform = `translate3d(${x - r.rect.x}px, ${y - r.rect.y}px, 0)`;
+        el.style.width = `${w}px`;
+        el.style.height = `${h}px`;
       }
     },
-    [bounds.w, bounds.h, win.rect, onMove],
+    [bounds.w, bounds.h, win.rect],
   );
 
   const stop = useCallback(() => {
+    const el = boxRef.current;
+    const live = liveRef.current;
+
     dragRef.current = null;
     resizeRef.current = null;
+    liveRef.current = null;
+
+    // 提交最终几何（整个拖动过程只触发一次 React 更新）
+    if (el && live) {
+      el.style.transform = '';
+      el.style.width = '';
+      el.style.height = '';
+      onMove(live);
+    }
     setDragging(false);
     setResizing(null);
-  }, []);
+  }, [onMove]);
 
+  /**
+   * 拖动/缩放期间监听全局指针事件。
+   *
+   * 关键：必须同时监听 pointerup 与 pointercancel，并在捕获阶段处理。
+   *
+   * 为什么之前"松手后窗口还在跟鼠标"：
+   * 鼠标拖过窗口内的 <iframe> 时，事件进入 iframe 的**独立文档**，
+   * 父窗口收不到 pointerup —— dragRef 永不清空，于是继续跟随。
+   *
+   * 三重保障：
+   *   1. setPointerCapture（在 startDrag 里）把指针事件锁定到标题栏元素；
+   *   2. 拖动期间给 iframe 盖上透明遮罩（pointer-events 归父窗口）；
+   *   3. 监听 pointercancel / blur，窗口失焦时也结束拖动。
+   */
   useEffect(() => {
     if (!dragging && !resizing) return;
+
+    const onUp = () => stop();
+    const onCancel = () => stop();
+    const onBlur = () => stop();
+
     window.addEventListener('pointermove', onPointerMove);
-    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointerup', onUp, true);
+    window.addEventListener('pointercancel', onCancel, true);
+    window.addEventListener('blur', onBlur);
     return () => {
       window.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointerup', onUp, true);
+      window.removeEventListener('pointercancel', onCancel, true);
+      window.removeEventListener('blur', onBlur);
     };
   }, [dragging, resizing, onPointerMove, stop]);
 
   const startDrag = (e: React.PointerEvent) => {
     if (win.maximized) return;
+    if (e.button !== 0) return; // 仅左键
     onFocus();
+    // 锁定指针：拖到 iframe 上方也能继续收到 pointermove/pointerup
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      /* 某些浏览器/合成事件不支持，忽略即可（还有遮罩兜底） */
+    }
     dragRef.current = { dx: e.clientX - win.rect.x, dy: e.clientY - win.rect.y };
     setDragging(true);
   };
 
   const startResize = (dir: string) => (e: React.PointerEvent) => {
     e.stopPropagation();
+    if (e.button !== 0) return;
     onFocus();
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      /* 忽略 */
+    }
     resizeRef.current = { startX: e.clientX, startY: e.clientY, rect: win.rect, dir };
     setResizing(dir);
   };
@@ -156,6 +232,7 @@ export default function AppWindowFrame({
 
   return (
     <div
+      ref={boxRef}
       className={`fpkm-win ${active ? 'fpkm-win-active' : ''}`}
       style={{
         left: win.rect.x,
@@ -221,6 +298,10 @@ export default function AppWindowFrame({
 
       {/* 内容区：iframe */}
       <div className="fpkm-win-body">
+        {/* 拖动/缩放时覆盖一层透明遮罩。
+            否则鼠标划过 iframe 时事件进入其独立文档，
+            父窗口收不到 pointermove，拖动会"丢帧"甚至卡住。 */}
+        {dragging || resizing ? <div className="fpkm-win-dragshield" /> : null}
         {win.loading && !win.failed && !inlineContent ? (
           <div className="fpkm-win-loading">
             <Spin size="large" tip="正在打开应用…" />
@@ -275,3 +356,22 @@ export default function AppWindowFrame({
     </div>
   );
 }
+
+/**
+ * 用 memo 包一层，避免桌面任一状态变化（例如拖动另一个窗口）时
+ * 所有窗口都跟着重渲染。
+ *
+ * 注意 inlineContent 每次渲染都是新对象，不能直接浅比较；
+ * 这里只比较真正影响渲染的字段，窗口内容由 React 内部的 key 保持不变。
+ */
+const AppWindowFrame = memo(AppWindowFrameInner, (a, b) => {
+  return (
+    a.win === b.win &&
+    a.active === b.active &&
+    a.bounds.w === b.bounds.w &&
+    a.bounds.h === b.bounds.h &&
+    a.inlineContent === b.inlineContent
+  );
+});
+
+export default AppWindowFrame;
