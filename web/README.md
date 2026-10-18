@@ -165,6 +165,55 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.78 补齐网关身份头（修复 fnOS gateway identity invalid）
+
+0.77 之后 fpkm 已能发现并采用 Lucky 实际创建的 socket：
+
+```
+/app/Lucky  socket=/vol2/@appcenter/Lucky/app.sock  available=True
+```
+
+随后 Lucky 返回 **`fnOS gateway identity invalid`** —— 这是应用侧的身份校验。
+
+#### 原因：只转发了三个身份头中的一个
+
+飞牛统一网关文档规定，网关校验会话后向应用转发**三个** Header：
+
+| Header | 说明 |
+|--------|------|
+| `X-Trim-Userid` | 当前用户 UID |
+| `X-Trim-Isadmin` | `true` / `false` |
+| `X-Trim-Username` | 当前用户名 |
+
+而 fpkm 早期只设置了 `X-Trim-Isadmin`（`"1"`），另两个完全没发。
+Lucky 拿到不完整的身份信息就判定身份非法。
+
+#### 修法
+
+两处转发路径（HTTP 反代与 WebSocket 握手）都补齐三个头，且值互相自洽：
+
+```go
+req.Header.Set("X-Trim-Userid", gatewayUserID())     // 进程真实 uid
+req.Header.Set("X-Trim-Username", gatewayUserName()) // 进程用户名
+req.Header.Set("X-Trim-Isadmin", "true")             // 布尔字面量
+```
+
+fpkm 是单用户模型（一个管理密码），没有多用户概念，因此统一以
+**管理员身份**转发；UID / 用户名取 fpkm 进程自身的值 ——
+它同时也是应用进程的运行身份，三者一致应用侧才会放行。
+
+`X-Trim-Isadmin` 从 `"1"` 改为 `"true"`，与规范中的布尔字面量一致。
+
+#### 测试
+
+新增 4 项，其中两项用源码断言防止只改一处：
+
+- `TestGatewayUserIDMatchesProcess`：UID 与当前进程一致
+- `TestGatewayUserNameNonEmpty`：用户名非空
+- `TestGatewayIdentityHeadersAreGrouped`：三个头在两处都齐全，Isadmin 为 `"true"`
+- `TestGatewayIdentityAppliedToBothPaths`：Userid/Username 至少出现 2 次
+  （HTTP + WebSocket），避免以后只改一处
+
 ### 0.77 兼容硬编码 fnOS 原生路径的应用（Lucky 最终修复）
 
 #### 结论：Lucky 的 socket 路径写死在二进制里

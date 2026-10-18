@@ -12,6 +12,7 @@ import (
 	"net/http/httputil"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -465,11 +466,22 @@ func (g *Gateway) getProxy(route *Route) *httputil.ReverseProxy {
 			req.Header.Set("X-Gateway-Prefix", prefix)
 			req.Header.Set("X-Original-Host", origHost)
 
-			// 模拟飞牛 trim_http_cgi 网关的管理员认证头
-			// 飞牛原版中 trim_http_cgi 服务验证用户身份后设置此头，
-			// 部分应用（如 hermes）通过此头判断是否为管理员访问
-			// fpkm 为单用户模型，始终设置为管理员
-			req.Header.Set("X-Trim-Isadmin", "1")
+			// 模拟飞牛 trim_http_cgi 网关的认证头。
+			//
+			// 飞牛规范（统一网关文档）中，网关校验会话后会转发**三个**头：
+			//   X-Trim-Userid   当前用户 UID
+			//   X-Trim-Isadmin  true / false
+			//   X-Trim-Username 当前用户名
+			//
+			// 早期 fpkm 只设置 Isadmin，导致部分应用校验失败。
+			// 实测 Lucky 3.0.2 会返回 "fnOS gateway identity invalid" ——
+			// 它需要完整的身份头集合，缺 Userid/Username 就判定身份非法。
+			//
+			// fpkm 是单用户模型（一个管理密码），因此统一以管理员身份转发，
+			// 用户信息取 fpkm 进程自身的 uid/用户名，保证三个头自洽。
+			req.Header.Set("X-Trim-Userid", gatewayUserID())
+			req.Header.Set("X-Trim-Username", gatewayUserName())
+			req.Header.Set("X-Trim-Isadmin", "true")
 
 			// 设置 Connection: close（尽量让后端关闭连接）
 			// 注意：中间代理可能吃掉这个 hop-by-hop 头，所以 bufferingTransport
@@ -1217,10 +1229,12 @@ func (g *Gateway) proxyWebSocket(w http.ResponseWriter, r *http.Request, route *
 	headers += fmt.Sprintf("X-Gateway-Prefix: %s\r\n", route.Prefix)
 	headers += fmt.Sprintf("X-Original-Host: %s\r\n", r.Host)
 
-	// 模拟飞牛 trim_http_cgi 网关的管理员认证头
-	// 部分应用（如 hermes）通过此头判断是否为管理员访问，
-	// 未设置时返回 403 fnos_admin_required，导致 WebSocket 握手失败
-	headers += "X-Trim-Isadmin: 1\r\n"
+	// 模拟飞牛 trim_http_cgi 网关的认证头（三个头必须成组，见 HTTP 转发处说明）
+	// 只给 Isadmin 时，部分应用会返回 403 fnos_admin_required
+	// 或 "fnOS gateway identity invalid"，导致 WebSocket 握手失败
+	headers += fmt.Sprintf("X-Trim-Userid: %s\r\n", gatewayUserID())
+	headers += fmt.Sprintf("X-Trim-Username: %s\r\n", gatewayUserName())
+	headers += "X-Trim-Isadmin: true\r\n"
 
 	headers += "\r\n"
 
@@ -1333,4 +1347,35 @@ func (g *Gateway) appProcessState(appName string) (int, bool) {
 		return pid, false
 	}
 	return pid, true
+}
+
+// gatewayUserID 返回转发给应用的 "X-Trim-Userid"。
+//
+// fpkm 是单用户模型（一个管理密码），没有多用户概念，
+// 因此统一使用 fpkm 进程自身的 uid —— 它同时也是应用进程的运行身份，
+// 三个身份头（Userid / Username / Isadmin）保持一致，应用侧校验才通过。
+//
+// 取不到时回落 "0"，与 root 场景一致（fpkm 典型以 root 运行）。
+func gatewayUserID() string {
+	if u, err := user.Current(); err == nil && u.Uid != "" {
+		return u.Uid
+	}
+	if v := os.Getuid(); v >= 0 {
+		return strconv.Itoa(v)
+	}
+	return "0"
+}
+
+// gatewayUserName 返回转发给应用的 "X-Trim-Username"。
+//
+// 与 gatewayUserID 对应，取 fpkm 进程的当前用户名；
+// 取不到时回落 "admin"（fpkm 只有一个管理员账号）。
+func gatewayUserName() string {
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	if v := os.Getenv("USER"); v != "" {
+		return v
+	}
+	return "admin"
 }
