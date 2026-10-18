@@ -165,6 +165,69 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.76 修复 fpkm 自身环境变量泄漏给应用（Lucky socket 建到 /vol2）
+
+**最终定位到的根因**：不是 Lucky 硬编码 `/vol2`，也不是 fpkm 传错了路径，
+而是 **fpkm 把自己的进程环境原样传给了应用**。
+
+#### 证据链
+
+fpkm 是作为飞牛应用（`fn-deepseek-harness`）跑在容器里的，
+它自己的进程环境带有该应用的飞牛变量：
+
+```
+TRIM_APPDEST   = /vol2/@appcenter/fn-deepseek-harness
+GATEWAY_SOCKET = /vol2/@appcenter/fn-deepseek-harness/app.sock
+TRIM_PKGVAR    = /vol2/@appdata/fn-deepseek-harness
+```
+
+而启动应用时用的是：
+
+```go
+cmd.Env = append(os.Environ(), env.ToOsEnv()...)   // ← 泄漏点
+```
+
+fpkm 只设置了自己认识的那些 `TRIM_*`，**从不设置也从不清理
+`GATEWAY_SOCKET`**，于是 `/vol2/@appcenter/` 这个前缀原封不动传给了 Lucky。
+Lucky 按飞牛约定用它定位 socket，把应用名换成自己，就得到
+`/vol2/@appcenter/Lucky/app.sock`；而 fpkm 一直在
+`{appDir}/target/app.sock` 上等待 —— 报"等待 Socket 超时"，
+应用日志里却明明是 `LuckyWeb Start success`。
+
+时间戳也吻合：`/vol2/@appcenter/Lucky/app.sock` 的 mtime 正是
+Lucky 启动的那一刻。
+
+#### 修法：隔离环境
+
+新增 `appEnviron(env)`，先剔除继承来的飞牛变量，再追加 fpkm 计算的值：
+
+```go
+for _, kv := range os.Environ() {
+    if isFnosEnvName(name) { continue }   // 丢弃 TRIM_* / GATEWAY_*
+    out = append(out, kv)
+}
+out = append(out, env.ToOsEnv()...)       // fpkm 的值放最后，覆盖同名项
+```
+
+`isFnosEnvName` 只匹配 `TRIM_*` 与 `GATEWAY_*` 两个命名空间，
+不会误删 `PATH` 或用户自定义变量。
+
+> 注：实测确认「同名环境变量**后者生效**」（`append(os.Environ(), override...)`
+> 中 override 会赢），所以问题不在 `TRIM_APPDEST` 的顺序，
+> 而在于 fpkm 从未清理 `GATEWAY_SOCKET` 这类它不设置的变量。
+
+#### 实测
+
+带污染环境（`GATEWAY_SOCKET=/vol2/@appcenter/...`）启动网关应用：
+
+```
+SOCKET_PATH=/tmp/dh4/.local/fpk/apps/fn-appstores-client/target/app.sock
+  存在=true
+```
+
+新增 3 项测试：继承变量被剔除、无关变量保留、子进程端到端验证
+（子进程里 `$GATEWAY_SOCKET` 为空、`$TRIM_APPDEST` 为 fpkm 设置的值）。
+
 ### 0.75 修复网关应用带端口启动导致 Socket 超时（Lucky 3.0.2）
 
 **背景更正**：0.74 误用了旧包 `Lucky_x86.fpk`（3.0.0，端口型）做诊断，

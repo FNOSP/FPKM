@@ -74,7 +74,7 @@ func (pm *ProcessManager) Start(entry *EntryInfo, env EnvMap) error {
 		c.Dir = entry.WorkDir
 		c.Stdout = preLog
 		c.Stderr = preLog
-		c.Env = append(os.Environ(), env.ToOsEnv()...)
+		c.Env = appEnviron(env)
 
 		if err := c.Run(); err != nil {
 			if pctx.Err() == context.DeadlineExceeded {
@@ -112,7 +112,7 @@ func (pm *ProcessManager) Start(entry *EntryInfo, env EnvMap) error {
 	cmd.Dir = entry.WorkDir
 	cmd.Stdout = logF
 	cmd.Stderr = logF
-	cmd.Env = append(os.Environ(), env.ToOsEnv()...)
+	cmd.Env = appEnviron(env)
 	setProcessGroup(cmd)
 
 	if err := cmd.Start(); err != nil {
@@ -152,7 +152,7 @@ func (pm *ProcessManager) Start(entry *EntryInfo, env EnvMap) error {
 		c.Dir = workDir
 		c.Stdout = extraLog
 		c.Stderr = extraLog
-		c.Env = append(os.Environ(), env.ToOsEnv()...)
+		c.Env = appEnviron(env)
 		setProcessGroup(c)
 
 		if err := c.Start(); err != nil {
@@ -182,7 +182,7 @@ func (pm *ProcessManager) startBashScript(entry *EntryInfo, env EnvMap) error {
 
 	cmd := exec.Command(entry.Command, entry.Args...)
 	cmd.Dir = entry.WorkDir
-	cmd.Env = append(os.Environ(), env.ToOsEnv()...)
+	cmd.Env = appEnviron(env)
 	setProcessGroup(cmd)
 
 	// 脚本的输出重定向到日志文件
@@ -490,4 +490,51 @@ func firstUntraversableDir(path string) string {
 		}
 	}
 	return ""
+}
+
+// appEnviron 构造应用子进程的环境变量。
+//
+// 关键：**不能直接 os.Environ() + 覆盖**，必须剔除从 fpkm 自身继承来的
+// 飞牛约定变量（TRIM_* / GATEWAY_*）。
+//
+// 真实故障（Lucky 3.0.2）：fpkm 是作为飞牛应用运行在 fn-deepseek-harness
+// 容器里的，其进程环境带有该应用的飞牛变量：
+//
+//	TRIM_APPDEST=/vol2/@appcenter/fn-deepseek-harness
+//	GATEWAY_SOCKET=/vol2/@appcenter/fn-deepseek-harness/app.sock
+//
+// fpkm 只设置了自己认识的 TRIM_* 项，却把整个 os.Environ() 原样传给子进程。
+// Lucky 按飞牛约定使用继承来的 @appcenter 前缀定位 socket，于是把
+// app.sock 建到 /vol2/@appcenter/Lucky/app.sock，而 fpkm 一直在
+// {appDir}/target/app.sock 上等待 —— 表现为"等待 Socket 超时"，
+// 但应用日志里明明是 "LuckyWeb Start success"。
+//
+// 因此这里先清空所有继承的 TRIM_*/GATEWAY_*，再追加 fpkm 自己算好的值，
+// 保证应用看到的飞牛变量只来自 fpkm。
+func appEnviron(env EnvMap) []string {
+	inherited := os.Environ()
+	out := make([]string, 0, len(inherited)+len(env))
+
+	for _, kv := range inherited {
+		name := kv
+		if i := strings.IndexByte(kv, '='); i >= 0 {
+			name = kv[:i]
+		}
+		if isFnosEnvName(name) {
+			continue // 丢弃继承来的飞牛变量
+		}
+		out = append(out, kv)
+	}
+
+	// fpkm 计算的值放最后：即使某个键重复，后出现的会覆盖先出现的
+	out = append(out, env.ToOsEnv()...)
+	return out
+}
+
+// isFnosEnvName 判断是否为飞牛约定的环境变量名。
+//
+// 只匹配 fpkm 需要独占的命名空间（TRIM_*、GATEWAY_*），
+// 避免误删用户自定义的无关变量。
+func isFnosEnvName(name string) bool {
+	return strings.HasPrefix(name, "TRIM_") || strings.HasPrefix(name, "GATEWAY_")
 }
