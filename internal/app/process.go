@@ -2,14 +2,18 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"fpkm/internal/logger"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -91,6 +95,19 @@ func (pm *ProcessManager) Start(entry *EntryInfo, env EnvMap) error {
 	logger.Debug("工作目录: %s", entry.WorkDir)
 	logger.Debug("环境变量: %v", env.ToOsEnv())
 
+	// 启动前确保可执行权限。
+	//
+	// 真实故障：Lucky 报 "fork/exec .../bin/lucky: permission denied"。
+	// 文件存在、架构也对，只是丢了执行位（x）。来源不止一处：
+	//   - 包内文件权限本来就是 0644（打包时不规范）；
+	//   - 升级/迁移时经 copyFile 复制，而 os.WriteFile 对**已存在**的
+	//     文件不会改权限，于是旧文件的 0644 被保留下来。
+	// 这里在 exec 之前补一次 chmod，对正常文件是幂等的（no-op）。
+	if err := ensureExecutable(entry.Command); err != nil {
+		logF.Close()
+		return err
+	}
+
 	cmd := exec.Command(entry.Command, entry.Args...)
 	cmd.Dir = entry.WorkDir
 	cmd.Stdout = logF
@@ -100,7 +117,7 @@ func (pm *ProcessManager) Start(entry *EntryInfo, env EnvMap) error {
 
 	if err := cmd.Start(); err != nil {
 		logF.Close()
-		return fmt.Errorf("启动进程失败: %w", err)
+		return execStartError(entry.Command, err)
 	}
 
 	pid := cmd.Process.Pid
@@ -364,3 +381,113 @@ func isPortInUse(port int) bool {
 // 预启动命令用于"创建 TUN 设备""初始化数据库"这类短任务，
 // 正常都应在数秒内结束。设置上限可避免解析异常时把启动流程卡死。
 const preStartTimeout = 60 * time.Second
+
+// ensureExecutable 在 exec 之前确保文件具备执行权限。
+//
+// 只处理"缺少 x 位"这一种情况；其它错误（文件不存在、是目录、
+// 文件系统 noexec 等）原样交给后续 exec 报错，避免掩盖真实原因。
+func ensureExecutable(path string) error {
+	if path == "" || strings.HasPrefix(path, "__builtin_") {
+		return nil
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		return nil // 不存在的情况让 exec 自己去报错，信息更准确
+	}
+	if st.IsDir() {
+		return nil
+	}
+	if st.Mode()&0111 != 0 {
+		return nil // 已有执行位
+	}
+
+	// 保留原权限，补上执行位（0644 → 0755）
+	newMode := st.Mode().Perm() | 0755
+	if err := os.Chmod(path, newMode); err != nil {
+		return fmt.Errorf("文件缺少执行权限且自动修复失败: %s: %w", path, err)
+	}
+	logger.Warn("已自动补上执行权限: %s (%o → %o)", path, st.Mode().Perm(), newMode)
+	return nil
+}
+
+// execStartError 把 exec 的底层错误翻译成可操作的中文提示。
+//
+// exec.Command 报错文本很生硬（"fork/exec /path: permission denied"），
+// 用户看不出该改什么。这里按 errno 分类给出具体建议。
+func execStartError(path string, err error) error {
+	msg := err.Error()
+
+	// 优先用 errors.Is 判断底层 errno（exec 返回的
+	// *os.PathError / *fs.PathError 可被 Is 识别），
+	// 文本匹配只作为兜底。
+	isPerm := errors.Is(err, fs.ErrPermission) || strings.Contains(msg, "permission denied")
+	isNotExist := errors.Is(err, fs.ErrNotExist) || strings.Contains(msg, "no such file")
+	isExecFormat := errors.Is(err, syscall.ENOEXEC) || strings.Contains(msg, "exec format error")
+
+	switch {
+	case isPerm:
+		detail := fmt.Sprintf(
+			"启动失败：文件没有执行权限\n"+
+				"  文件: %s\n"+
+				"  处理: chmod +x %q\n"+
+				"  若执行上面命令后仍报同样错误，说明该目录所在文件系统挂载了 noexec，\n"+
+				"  需要用 mount -o remount,exec 重新挂载，或把应用装到别的分区。",
+			path, path)
+		// 附带目录权限链诊断：路径上任意一级缺少 x 也会导致 EACCES
+		if bad := firstUntraversableDir(path); bad != "" {
+			detail += fmt.Sprintf("\n  另外发现上级目录不可进入（缺少 x 权限）: %s", bad)
+		}
+		return errors.New(detail)
+
+	case isNotExist:
+		return fmt.Errorf("启动失败：找不到可执行文件\n  文件: %s", path)
+
+	case isExecFormat:
+		return fmt.Errorf(
+			"启动失败：可执行文件格式不匹配\n"+
+				"  文件: %s\n"+
+				"  当前系统: %s/%s，请确认安装的是对应架构的包",
+			path, runtime.GOOS, runtime.GOARCH)
+
+	case strings.Contains(msg, "text file busy"):
+		return fmt.Errorf("启动失败：可执行文件正被占用（可能上次进程尚未完全退出）\n  文件: %s", path)
+
+	case strings.Contains(msg, "too many open files"):
+		return fmt.Errorf("启动失败：文件句柄数达到上限，请检查系统的 ulimit -n")
+	}
+
+	return fmt.Errorf("启动进程失败: %w", err)
+}
+
+// firstUntraversableDir 找出路径中第一个"当前用户无法进入"的目录。
+//
+// 用于诊断 EACCES：exec 失败时报的是目标文件，但真正原因
+// 往往是某一级上级目录缺少 x 权限（例如安装目录父级是 0700）。
+func firstUntraversableDir(path string) string {
+	dir := filepath.Dir(path)
+	var dirs []string
+	for {
+		dirs = append(dirs, dir)
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	// 从最上层往下检查，报最靠近根的那一级，更接近真实原因
+	for i := len(dirs) - 1; i >= 0; i-- {
+		d := dirs[i]
+		st, err := os.Stat(d)
+		if err != nil {
+			continue
+		}
+		// 用 stat + 访问检查：能 ListDir 说明可进入
+		if _, err := os.ReadDir(d); err != nil {
+			return d
+		}
+		if st.Mode().Perm()&0111 == 0 {
+			return d
+		}
+	}
+	return ""
+}

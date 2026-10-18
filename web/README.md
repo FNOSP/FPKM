@@ -165,6 +165,82 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.73 修复应用启动报 permission denied（Lucky 事故）
+
+**现象**：
+
+```
+ERROR 启动失败: 启动进程失败: fork/exec /root/.local/fpk/apps/Lucky/target/bin/lucky: permission denied
+```
+
+注意是 `permission denied`（EACCES）而不是 `no such file`（ENOENT）：
+文件**存在**，只是没有执行位（x）。
+
+#### 根因（两个独立点的叠加）
+
+**1. 包内权限本就不规范 / 旧文件遗留**
+
+`fork/exec` 只认文件的 `x` 位。文件是 `0644` 时即报 EACCES。
+
+**2. `copyFile` 的隐秘 bug**
+
+```go
+// 错误写法
+return os.WriteFile(dst, data, mode)
+```
+
+`os.WriteFile` 的 perm 参数**只对"新建文件"生效**；
+目标文件已存在时（升级/重装/跨设备移动的常见路径）
+旧权限被原样保留。实测：
+
+```
+初始 mode=644
+WriteFile(...,0755) 后 mode=644   ← 没变
+新文件 mode=755
+```
+
+因此即使源文件带执行位，覆盖到旧文件上也会保持 0644，
+最终表现为启动时报 permission denied。
+
+`moveDirContents` 里跨设备建目录同理（`MkdirAll` 对已存在目录也不改权限，
+而目录缺 x 位同样导致其中文件无法被 exec）。
+
+#### 修法
+
+**a. 启动前自愈**（`ensureExecutable`）：exec 之前检查目标文件，
+缺 x 位就补上（`0644 → 0755`），并打一条 warn 日志。对正常文件是 no-op。
+
+**b. 复制时对齐权限**（`copyFile`）：`WriteFile` 之后显式 `os.Chmod`，
+保证目标权限与源文件一致；`moveDirContents` 建目录后同样 chmod。
+
+**c. 错误信息可操作**（`execStartError`）：按 errno 分类给建议，
+不再是生硬的 `fork/exec ...: permission denied`：
+
+```
+启动失败：文件没有执行权限
+  文件: /path/to/bin/lucky
+  处理: chmod +x "/path/to/bin/lucky"
+  若执行上面命令后仍报同样错误，说明该目录所在文件系统挂载了 noexec，
+  需要用 mount -o remount,exec 重新挂载，或把应用装到别的分区。
+```
+
+还会附带诊断"路径上哪一级上级目录缺少 x 权限"（`firstUntraversableDir`）。
+判断用 `errors.Is(err, fs.ErrPermission/fs.ErrNotExist)` + `syscall.ENOEXEC`，
+文本匹配只作兜底。
+
+#### 实测
+
+把 Lucky 的二进制故意改成 `0644` 后启动：
+
+```
+[WARN] 已自动补上执行权限: .../bin/lucky (644 → 755)
+[OK]   应用 Lucky 已启动 (PID: 2264859, 端口: 16601)
+```
+
+新增 9 项测试覆盖：自愈、幂等、文件不存在、内置命令跳过、
+`copyFile` 修正已存在文件、非可执行文件不被误加 x、错误文案、
+目录移动保留执行位。
+
 ### 0.72 修复「正在打开应用…」被压成竖排
 
 **现象**：打开应用子窗口时，加载提示竖着排成一列：

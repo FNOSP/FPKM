@@ -1597,9 +1597,17 @@ func moveDirContents(srcDir, dstDir string) error {
 		dst := filepath.Join(dstDir, entry.Name())
 
 		if entry.IsDir() {
-			if err := os.MkdirAll(dst, 0755); err != nil {
+			// 保留源目录权限（至少补到 0755）：
+			// 目录缺少 x 位同样会导致其中文件无法被 exec。
+			dirMode := os.FileMode(0755)
+			if st, serr := entry.Info(); serr == nil {
+				dirMode = st.Mode().Perm() | 0755
+			}
+			if err := os.MkdirAll(dst, dirMode); err != nil {
 				return err
 			}
+			// MkdirAll 对已存在目录不生效，显式对齐权限
+			_ = os.Chmod(dst, dirMode.Perm())
 			if err := moveDirContents(src, dst); err != nil {
 				return err
 			}
@@ -1637,7 +1645,19 @@ func copyFile(src, dst string) error {
 		mode = mode | 0644
 	}
 
-	return os.WriteFile(dst, data, mode)
+	if err := os.WriteFile(dst, data, mode); err != nil {
+		return err
+	}
+
+	// 关键：os.WriteFile 的 perm 参数**只对新建文件生效**。
+	// 如果 dst 已存在（升级/重装时常见），旧权限会被原样保留 ——
+	// 旧版本若是 0644，即使源文件有执行位也补不回来，
+	// 最终表现为 "fork/exec ...: permission denied"。
+	// 因此这里显式 chmod 一次，保证权限与源文件一致。
+	if err := os.Chmod(dst, mode.Perm()); err != nil {
+		return err
+	}
+	return nil
 }
 
 // prepareAppShare 准备 shares 数据目录
