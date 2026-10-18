@@ -267,6 +267,11 @@ export default function Desktop({
 
       const rect = saved ? clampRect(saved, bounds) : { x, y, w, h };
 
+      // 打开即记录：需求要求"子窗口的大小和位置"被记住，
+      // 不能只在用户拖动/缩放之后才写。已有记录的窗口打开时
+      // 写入的是同一个值（幂等），不会产生抖动。
+      saveWindowRect(ic.key, rect);
+
       const nz = zTop + 1;
       setZTop(nz);
       setWindows((ws) => [
