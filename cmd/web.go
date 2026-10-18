@@ -151,6 +151,11 @@ func runWebServer(cfg *config.Config) {
 	// 否则重启后已安装的应用（socket/CGI）不会被代理，/app/* 会 404。
 	registerExistingRoutes(srv)
 
+	// 恢复上次处于运行状态的应用（异步，不阻塞监听）。
+	// 应用是 fpkm 拉起的子进程，fpkm 退出时随之结束，
+	// 因此这里按"用户意图"重新拉起它们。
+	web.RestoreAutostart(cfg, srv)
+
 	logger.Success("FPKM 应用商店已启动")
 	logger.Info("  监听地址: %s", addr)
 	if webOpenAddr {

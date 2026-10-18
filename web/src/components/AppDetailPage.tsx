@@ -34,6 +34,11 @@ interface Props {
   onBack: () => void;
   onAction: (name: string, action: 'start' | 'stop' | 'uninstall' | 'upgrade', path?: string) => void;
   onInstall: (id: string) => void;
+  /**
+   * 按应用名打开。桌面模式下由桌面提供，
+   * 使详情页的「打开」与桌面图标行为一致（子窗口 / 新标签页）。
+   */
+  onOpenApp?: (name: string) => void;
 }
 
 const { Text, Title, Paragraph } = Typography;
@@ -69,6 +74,7 @@ export default function AppDetailPage({
   onBack,
   onAction,
   onInstall,
+  onOpenApp,
 }: Props) {
   const [detail, setDetail] = useState<AppDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -189,6 +195,11 @@ export default function AppDetailPage({
             icon={<IconExternalOpen />}
             disabled={!accessURL}
             onClick={() => {
+              // 桌面模式：交给桌面按 launchMode 决定子窗口/新标签页
+              if (onOpenApp) {
+                onOpenApp(detail.name);
+                return;
+              }
               if (accessURL) window.open(accessURL, '_blank', 'noopener');
             }}
           >

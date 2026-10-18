@@ -81,6 +81,8 @@ export default function Taskbar({ icons, windows, activeId, onOpenIcon, onRemove
                   <Dropdown.Item onClick={() => onRemoveFromDock(ic.appName!)}>
                     从任务栏移除
                   </Dropdown.Item>
+                  {/* 移除后如何找回：右键桌面可恢复；
+                      已不再运行的图标不在桌面上，需要在商店里重新启动。 */}
                 </Dropdown.Menu>
               }
             >

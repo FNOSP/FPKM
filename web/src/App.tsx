@@ -505,7 +505,7 @@ export default function App() {
     );
   }
 
-  const renderStore = () => {
+  const renderStore = (onOpenApp?: (name: string) => void) => {
     if (storeLoading && !store) {
       return (
         <div style={{ textAlign: 'center', padding: 80 }}>
@@ -530,6 +530,7 @@ export default function App() {
             busy={installingId === a.id}
             onInstall={doStoreInstall}
             onOpenDetail={openStoreDetail}
+            onOpenApp={onOpenApp}
             accessURL={a.installed && a.running ? buildAccessURL(a.access, meta?.publicHost, meta?.publicScheme) : null}
           />
         ))}
@@ -537,7 +538,7 @@ export default function App() {
     );
   };
 
-  const renderInstalled = () => {
+  const renderInstalled = (onOpenApp?: (name: string) => void) => {
     if (loading && apps.length === 0) {
       return (
         <div style={{ textAlign: 'center', padding: 80 }}>
@@ -568,6 +569,7 @@ export default function App() {
             publicScheme={meta?.publicScheme}
             onAction={runAction}
             onOpenDetail={openInstalledDetail}
+            onOpenApp={onOpenApp}
           />
         ))}
       </div>
@@ -629,7 +631,16 @@ export default function App() {
    *   2. 全屏模式（mode==='store'，极少用，保留兜底）。
    * 因此抽成函数，把"返回桌面"的回调作为参数传入。
    */
-  const buildShell = (onBackToDesktop: () => void) => (
+  const buildShell = (
+    onBackToDesktop: () => void,
+    /**
+     * 按应用名打开（桌面模式下传入桌面的打开逻辑）。
+     * 桌面模式要求商店里的「打开」与桌面图标行为一致：
+     * iframe → 子窗口，url → 新标签页。
+     * 全屏兜底模式下不传，退化为新标签页打开。
+     */
+    onOpenApp?: (appName: string) => void,
+  ) => (
     <div className="fpkm-shell">
       {/* ================= 侧边栏 ================= */}
       <aside className="fpkm-side">
@@ -875,7 +886,7 @@ export default function App() {
                 />
               ) : null}
 
-              {renderStore()}
+              {renderStore(onOpenApp)}
             </>
           ) : null}
 
@@ -902,7 +913,7 @@ export default function App() {
                 />
               ) : null}
 
-              {renderStore()}
+              {renderStore(onOpenApp)}
             </>
           ) : null}
 
@@ -919,6 +930,7 @@ export default function App() {
               }}
               onAction={runAction}
               onInstall={(id) => doStoreInstall({ id, name: '' })}
+              onOpenApp={onOpenApp}
             />
           ) : null}
 
@@ -936,7 +948,7 @@ export default function App() {
                   style={{ marginBottom: 16 }}
                 />
               ) : null}
-              {renderInstalled()}
+              {renderInstalled(onOpenApp)}
             </>
           ) : null}
         </div>
@@ -1021,7 +1033,7 @@ export default function App() {
         apps={apps}
         meta={meta}
         loading={loading}
-        renderStore={(closeStoreWindow) => buildShell(closeStoreWindow)}
+        renderStore={(closeStoreWindow, onOpenApp) => buildShell(closeStoreWindow, onOpenApp)}
         onOpenStore={() => setMode('store')}
         onStartApp={startFromDesktop}
         onOpenDetail={openAppDetailFromDesktop}

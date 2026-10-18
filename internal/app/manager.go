@@ -615,6 +615,14 @@ func (m *Manager) Start(appname string) error {
 		return fmt.Errorf("应用 %s 未安装", appname)
 	}
 
+	// 已在运行则直接返回：启动是幂等操作。
+	// 否则重复调用会拉起第二个进程，覆盖 PID 文件后旧进程失控
+	// （FPKM 重启后恢复自启动时会命中这条路径）。
+	if pm := NewProcessManager(m.cfg.AppPidFile(appname), m.cfg.AppLogFile(appname)); pm.IsRunning() {
+		logger.Info("应用 %s 已在运行，跳过启动", appname)
+		return nil
+	}
+
 	// 读取环境变量
 	env, err := LoadEnvFile(m.cfg.AppEnvFile(appname))
 	if err != nil {

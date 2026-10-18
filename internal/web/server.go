@@ -43,6 +43,8 @@ type Server struct {
 	opts      Options
 	tasks     *TaskManager
 	autoStart bool
+	// autostart 记录"应保持运行"的应用，FPKM 重启后自动拉起。
+	autostart *autostartStore
 	auth      *AuthManager
 	catalog   *Catalog
 	icons     *iconCache
@@ -69,6 +71,7 @@ func NewServer(cfg *config.Config, opts Options) *Server {
 		opts:      opts,
 		tasks:     NewTaskManager(),
 		autoStart: opts.AutoStart,
+		autostart: newAutostartStore(cfg),
 		auth:      NewAuthManager(filepath.Join(cfg.BaseDir, "password.json")),
 		catalog:   NewCatalog(NewSourceStore(cfg)),
 		icons:     newIconCache(cfg),

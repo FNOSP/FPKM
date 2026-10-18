@@ -19,7 +19,11 @@ interface Props {
    * iframe 是独立文档，会重新下载并执行整个 SPA，打开很慢。
    * 参数是"关闭商店窗口"的回调，供商店内的「返回桌面」按钮使用。
    */
-  renderStore: (closeStoreWindow: () => void) => React.ReactNode;
+  renderStore: (
+    closeStoreWindow: () => void,
+    /** 按应用名打开（商店里的「打开」按钮复用桌面的打开逻辑） */
+    onOpenApp: (appName: string) => void,
+  ) => React.ReactNode;
   /** 全屏打开应用商店（兜底入口） */
   onOpenStore: () => void;
   /** 启动应用；resolve 为 true 表示启动成功 */
@@ -249,6 +253,26 @@ export default function Desktop({
     [apps, windows, focusWindow, openWindow, onStartApp],
   );
 
+  /**
+   * 按应用名打开，供商店里的「打开」按钮复用。
+   *
+   * 这样商店与桌面图标走**同一条**打开逻辑：
+   *   - ui/config 里 type=iframe → 桌面子窗口
+   *   - type=url                → 新浏览器标签页
+   * 而不是商店里一律 window.open（那样会把 iframe 应用开成独立标签页）。
+   */
+  const openAppByName = useCallback(
+    (appName: string) => {
+      const ic = allIcons.find((x) => x.appName === appName);
+      if (!ic) {
+        Toast.warning('未找到该应用，请稍后重试');
+        return;
+      }
+      void openIcon(ic);
+    },
+    [allIcons, openIcon],
+  );
+
   /** 任务栏应显示的图标：排除用户移除的，且只显示已安装应用 + 商店 */
   const dockIcons = useMemo(
     () => allIcons.filter((ic) => ic.builtin === 'store' || !dock.isHidden(ic.appName ?? '')),
@@ -368,7 +392,11 @@ export default function Desktop({
             win={w}
             active={w.id === activeId}
             bounds={bounds}
-            inlineContent={w.builtin === 'store' ? renderStore(() => closeWindow(w.id)) : undefined}
+            inlineContent={
+              w.builtin === 'store'
+                ? renderStore(() => closeWindow(w.id), openAppByName)
+                : undefined
+            }
             onFocus={() => focusWindow(w.id)}
             onClose={() => closeWindow(w.id)}
             onMinimize={() => setWindows((ws) => ws.map((x) => (x.id === w.id ? { ...x, minimized: true } : x)))}

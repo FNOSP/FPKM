@@ -12,6 +12,7 @@ import (
 	"fpkm/internal/app"
 	"fpkm/internal/config"
 	"fpkm/internal/fpk"
+	"fpkm/internal/logger"
 )
 
 // AppView 返回给前端的应用信息
@@ -179,8 +180,19 @@ func (s *Server) handleAppAction(w http.ResponseWriter, r *http.Request) {
 			switch action {
 			case "start":
 				opErr = s.mgr.Start(name)
+				if opErr == nil {
+					// 记录用户意图：FPKM 重启后应自动拉起该应用
+					if aerr := s.autostart.mark(name); aerr != nil {
+						logger.Warn("记录应用自启动失败（不影响运行）: %v", aerr)
+					}
+				}
 			case "stop":
 				opErr = s.mgr.Stop(name)
+				// 用户主动停止：不再自动重启。即使 Stop 报错也要清记录，
+				// 否则下次启动会违背用户意图把它拉起来。
+				if uerr := s.autostart.unmark(name); uerr != nil {
+					logger.Warn("清除应用自启动记录失败: %v", uerr)
+				}
 			case "uninstall":
 				// 服务端按向导规则再校验一次（接口可被直接调用）
 				if verr := validateWizardSubmission(s.cfg.AppDir(name), app.WizardUninstall, wizardValues); verr != nil {
@@ -188,6 +200,11 @@ func (s *Server) handleAppAction(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 				opErr = s.mgr.Uninstall(name, wizardValues)
+				if opErr == nil {
+					if uerr := s.autostart.unmark(name); uerr != nil {
+						logger.Warn("清除应用自启动记录失败: %v", uerr)
+					}
+				}
 			}
 			if opErr != nil {
 				task.append(LogLevel("error"), opErr.Error())

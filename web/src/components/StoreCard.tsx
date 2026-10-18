@@ -13,6 +13,12 @@ interface Props {
   onOpenDetail?: (storeId: string) => void;
   /** 已安装应用的访问地址（用于"打开"） */
   accessURL?: string | null;
+  /**
+   * 按应用名打开。
+   * 桌面模式下由桌面提供，使商店的「打开」与桌面图标行为一致
+   * （ui/config 的 type=iframe → 子窗口；type=url → 新标签页）。
+   */
+  onOpenApp?: (name: string) => void;
 }
 
 const { Text } = Typography;
@@ -55,7 +61,14 @@ function cleanName(name: string, id: string): string {
   return name;
 }
 
-export default function StoreCard({ app, busy, onInstall, onOpenDetail, accessURL }: Props) {
+export default function StoreCard({
+  app,
+  busy,
+  onInstall,
+  onOpenDetail,
+  accessURL,
+  onOpenApp,
+}: Props) {
   const unsupported = !app.platformSupported;
   const tags = app.tags ?? [];
   const title = cleanName(app.name, app.id);
@@ -149,6 +162,13 @@ export default function StoreCard({ app, busy, onInstall, onOpenDetail, accessUR
               icon={<IconPlay />}
               disabled={!accessURL}
               onClick={() => {
+                // 桌面模式：交给桌面按 launchMode 决定子窗口/新标签页
+                if (onOpenApp) {
+                  // StoreApp 的 name 是商店展示名，打开要用已安装的应用名：
+                  // app.id 与已安装目录名一致（服务端按 id 安装）。
+                  onOpenApp(app.id || app.name);
+                  return;
+                }
                 if (accessURL) window.open(accessURL, '_blank', 'noopener');
               }}
             >

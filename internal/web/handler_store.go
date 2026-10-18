@@ -400,6 +400,11 @@ func (s *Server) handleStoreInstall(w http.ResponseWriter, r *http.Request) {
 				task.finish(TaskSuccess, msg)
 				return
 			}
+			// 安装后自动启动同样属于"用户希望它运行"，
+			// 记录后 FPKM 重启会自动恢复。
+			if aerr := s.autostart.mark(appname); aerr != nil {
+				logger.Warn("记录应用自启动失败（不影响运行）: %v", aerr)
+			}
 			task.append(LogLevel("info"), "应用已启动")
 		}
 		task.finish(TaskSuccess, "")
