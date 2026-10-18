@@ -165,6 +165,82 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.77 兼容硬编码 fnOS 原生路径的应用（Lucky 最终修复）
+
+#### 结论：Lucky 的 socket 路径写死在二进制里
+
+经过 A/B 对照实验，`/vol2/@appcenter/Lucky/app.sock` 与**任何外部输入无关**：
+
+| 实验条件 | socket 路径 |
+|---------|------------|
+| `TRIM_APPDEST_VOL=/vol2` | `/vol2/@appcenter/Lucky/app.sock` |
+| **不给** `TRIM_APPDEST_VOL` | 同上 |
+| `TRIM_APPDEST_VOL=/tmp/xxx`（非卷路径） | 同上 |
+| **`env -i` 完全空环境** | 同上 |
+| 二进制复制到 `/tmp/nv5/bin` 再运行 | 同上 |
+| `TRIM_APPNAME=NoSuchAppXYZ` | 同上 |
+
+把 `/vol2/@appcenter` 遮蔽后，Lucky 自己说出了原因：
+
+```
+fnOS gateway socket startup failed: resolve Lucky fnOS gateway socket:
+Lucky: stat fnOS application target: stat /vol2/@appcenter/Lucky: no such file or directory
+```
+
+它直接 `stat /vol2/@appcenter/Lucky`，且**不会回退**去找 `/vol1`。
+说明这是 Lucky 针对飞牛商店的定制构建，卷号与应用名在交付时写死。
+
+#### 冲突本质
+
+- 飞牛规范：`gatewaySocket` 应放在 `${TRIM_APPDEST}/`（即 `target/`）
+- Lucky 实际：忽略规范，固定用 `/vol2/@appcenter/Lucky`
+
+fpkm 把应用装在 `~/.local/fpk/apps/Lucky/target/`，Lucky 永远不会去那里建 socket，
+所以 fpkm 等 30 秒必然超时。
+
+#### 修法：认可并适配实际路径
+
+`waitForSocket` 改为探测**多个候选路径**，返回实际命中的那个：
+
+```go
+// 1. 首选：fpkm 配置的路径（符合飞牛规范的应用，立刻命中）
+// 2. 兼容：/vol{N}/@appcenter/{appname}/{socketName}（硬编码原生路径的定制构建）
+```
+
+命中后把 `SOCKET_PATH` / `TRIM_SERVICE_SOCKET` 修正为真实路径并落盘，
+后续网关注册与下次启动都用它：
+
+```
+[WARN] 应用实际使用的 Socket 与配置不同，已改用: /vol2/@appcenter/Lucky/app.sock
+```
+
+超时错误信息现在会列出**所有探测过的路径**，便于排查。
+
+#### 一个坑：`/vol00` `/vol01` `/vol02`
+
+根目录下同时存在 `/vol1` `/vol2` `/vol3` 与 `/vol00` `/vol01` `/vol02`。
+`df` 显示后者都挂在 `/dev/nvme0n1p2`（根分区），只是空挂载点目录，
+不是真实存储卷。因此卷枚举只接受「无前导零」形式（`/vol1`、`/vol2`…），
+既避免重复探测，也避免误判。
+
+#### 实测
+
+候选路径（本机真实输出）：
+
+```
+1. {appDir}/target/app.sock              不存在
+2. /vol1/@appcenter/Lucky/app.sock       不存在
+3. /vol2/@appcenter/Lucky/app.sock       不存在
+4. /vol3/@appcenter/Lucky/app.sock       不存在
+```
+
+新增 6 项测试，其中两项是端到端：
+
+- `TestWaitForSocketDiscoversAppcenterSocket`：应用只在模拟卷的
+  `@appcenter/` 下建 socket，`waitForSocket` 仍能在 1.5s 内发现并返回该路径
+- `TestWaitForSocketPrefersConfiguredWhenPresent`：配置路径存在时优先用它，
+  不被 appcenter 路径抢走
+
 ### 0.76 修复 fpkm 自身环境变量泄漏给应用（Lucky socket 建到 /vol2）
 
 **最终定位到的根因**：不是 Lucky 硬编码 `/vol2`，也不是 fpkm 传错了路径，

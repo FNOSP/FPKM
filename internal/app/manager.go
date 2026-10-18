@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -927,8 +928,18 @@ func (m *Manager) Start(appname string) error {
 	// 而不是等用户打开页面时才看到"Socket 不存在（应用可能未启动）"。
 	socketPath := env["SOCKET_PATH"]
 	if socketPath != "" && env["GATEWAY_PREFIX"] != "" {
-		if err := m.waitForSocket(appname, socketPath, pm); err != nil {
+		// 应用实际创建的 socket 未必在 SOCKET_PATH 上（见 waitForSocket 注释）。
+		// 返回实际命中的路径，并同步回 env，让网关注册与后续启动都用它。
+		actual, err := m.waitForSocket(appname, socketPath, pm)
+		if err != nil {
 			return err
+		}
+		if actual != "" && actual != socketPath {
+			logger.Warn("应用实际使用的 Socket 与配置不同，已改用: %s（配置原为 %s）", actual, socketPath)
+			env["SOCKET_PATH"] = actual
+			env["TRIM_SERVICE_SOCKET"] = actual
+			SaveEnvFile(m.cfg.AppEnvFile(appname), env)
+			socketPath = actual
 		}
 		m.registerToGateway(appname, env["GATEWAY_PREFIX"], socketPath)
 	}
@@ -942,7 +953,99 @@ func (m *Manager) Start(appname string) error {
 	return nil
 }
 
+// fnosVolumesFn 供测试注入卷列表；生产环境用 fnosAppcenterVolumes。
+var fnosVolumesFn = fnosAppcenterVolumes
+
+// fnosAppcenterVolumes 返回需要探测的 fnOS 存储卷根路径。
+//
+// 只用于「查找应用把 socket 建到哪了」，不创建任何目录或软链接。
+//
+// 注意：根目录下同时存在 /vol1、/vol2、/vol3 与 /vol00、/vol01、/vol02。
+// 后者只是根分区上的空挂载点目录（df 显示为 /dev/nvme0n1p2），
+// 不是真实存储卷。这里只接受「无前导零」的形式（/vol1、/vol2…），
+// 既避免重复探测同一个卷，也避免误判。
+func fnosAppcenterVolumes() []string {
+	entries, err := os.ReadDir("/")
+	if err != nil {
+		return nil
+	}
+	var vols []string
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() || !strings.HasPrefix(name, "vol") {
+			continue
+		}
+		suffix := strings.TrimPrefix(name, "vol")
+		n, err := strconv.Atoi(suffix)
+		if err != nil || n <= 0 {
+			continue
+		}
+		// 排除 /vol01 这类补零写法（规范卷名是 /vol1）
+		if strconv.Itoa(n) != suffix {
+			continue
+		}
+		vols = append(vols, "/"+name)
+	}
+	sort.Slice(vols, func(i, j int) bool {
+		a, _ := strconv.Atoi(strings.TrimPrefix(vols[i], "/vol"))
+		b, _ := strconv.Atoi(strings.TrimPrefix(vols[j], "/vol"))
+		return a < b
+	})
+	return vols
+}
+
+// socketCandidates 返回应用可能创建 unix socket 的候选路径（按优先级）。
+//
+// 为什么需要多个候选：
+//
+//	飞牛规范要求 gatewaySocket 放在 ${TRIM_APPDEST}/ 下，
+//	fpkm 传入的 TRIM_APPDEST = {appDir}/target，所以首选路径就是它。
+//
+//	但实测 Lucky 3.0.2 是「飞牛商店定制构建」，它在二进制里**硬编码**了
+//	stat /vol2/@appcenter/Lucky 并直接在该目录创建 app.sock，
+//	完全忽略 TRIM_APPDEST 与环境变量（以下 A/B 实验均得到 /vol2 路径）：
+//	  1) 不给任何 TRIM_*（env -i 空环境）
+//	  2) TRIM_APPDEST_VOL 设为 /vol2、/tmp/xxx 或不设置
+//	  3) TRIM_APPNAME 改成 NoSuchAppXYZ
+//	  4) 二进制复制到 /tmp 后再运行
+//	遮蔽 /vol2/@appcenter 后它明确报：
+//	  stat fnOS application target: stat /vol2/@appcenter/Lucky: no such file
+//	说明该路径写死在二进制内，且不会回退到其它卷。
+//
+// 因此这里在"首选路径"之外，补充探测 {vol}/@appcenter/{appname}/ 下的
+// 同名 socket，命中后由调用方把 SOCKET_PATH 修正为实际路径。
+// 这样既不影响符合规范的应用（首选路径立刻命中），
+// 也能兼容 Lucky 这类忽略规范的定制构建。
+func (m *Manager) socketCandidates(appname, socketPath string) []string {
+	seen := make(map[string]bool, 4)
+	var out []string
+	add := func(p string) {
+		if p == "" || seen[p] {
+			return
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+
+	// 1. 首选：fpkm 配置的路径（即 ${TRIM_APPDEST}/app.sock，符合飞牛规范）
+	add(socketPath)
+
+	socketName := filepath.Base(socketPath)
+	if socketName == "" || socketName == "." || socketName == string(filepath.Separator) {
+		socketName = "app.sock"
+	}
+
+	// 2. 兼容：fnOS 原生 @appcenter 布局（Lucky 等定制构建硬编码的位置）
+	for _, vol := range fnosVolumesFn() {
+		add(filepath.Join(vol, "@appcenter", appname, socketName))
+	}
+
+	return out
+}
+
 // waitForSocket 等待应用创建 Unix Socket，并确认它稳定可用。
+//
+// 返回**实际命中的路径**（可能不同于传入的 socketPath，见 socketCandidates）。
 //
 // 统一网关应用（gatewaySocket）需要应用自己监听 socket，进程启动到监听
 // 之间有间隔；此外应用可能"先建 socket 再崩溃"（典型如 uvicorn：先绑定
@@ -951,8 +1054,8 @@ func (m *Manager) Start(appname string) error {
 // 因此这里主动等待并诊断：
 //   - 期间进程退出 → 读取应用日志中的真实原因
 //   - socket 出现后又消失 → 视为启动失败
-//   - 超时仍未出现 → 返回超时说明
-func (m *Manager) waitForSocket(appname, socketPath string, pm *ProcessManager) error {
+//   - 超时仍未出现 → 返回超时说明（列出所有探测过的路径）
+func (m *Manager) waitForSocket(appname, socketPath string, pm *ProcessManager) (string, error) {
 	const (
 		timeout  = 30 * time.Second
 		interval = 300 * time.Millisecond
@@ -961,55 +1064,69 @@ func (m *Manager) waitForSocket(appname, socketPath string, pm *ProcessManager) 
 		settle = 1500 * time.Millisecond
 	)
 
+	candidates := m.socketCandidates(appname, socketPath)
+
 	deadline := time.Now().Add(timeout)
-	sawSocket := false
+	active := "" // 当前命中的 socket 路径
 	var socketSeenAt time.Time
 
+	// find 返回当前存在的候选 socket（按优先级取第一个）
+	find := func() string {
+		for _, c := range candidates {
+			if fileExists(c) {
+				return c
+			}
+		}
+		return ""
+	}
+
 	for time.Now().Before(deadline) {
-		exists := fileExists(socketPath)
+		found := find()
 		alive := pm.IsRunning()
 
-		if exists && !sawSocket {
-			sawSocket = true
+		if found != "" && active == "" {
+			active = found
 			socketSeenAt = time.Now()
-			logger.Debug("检测到 Socket，等待其稳定: %s", socketPath)
+			logger.Debug("检测到 Socket，等待其稳定: %s", found)
 		}
 
 		// 进程已退出：无论 socket 是否出现过，都算启动失败
 		if !alive {
 			if detail := m.appLogTail(appname, 12); detail != "" {
-				return fmt.Errorf("应用 %s 启动后立即退出，未能提供可用的 Socket %s\n原因（摘自日志）:\n%s",
+				return "", fmt.Errorf("应用 %s 启动后立即退出，未能提供可用的 Socket %s\n原因（摘自日志）:\n%s",
 					appname, socketPath, detail)
 			}
-			return fmt.Errorf("应用 %s 启动后立即退出，未能创建 Socket %s（详见日志: %s）",
+			return "", fmt.Errorf("应用 %s 启动后立即退出，未能创建 Socket %s（详见日志: %s）",
 				appname, socketPath, m.cfg.AppLogFile(appname))
 		}
 
 		// socket 曾出现但已消失，说明应用启动过程中失败并清理了 socket
-		if sawSocket && !exists {
+		if active != "" && found == "" {
 			if detail := m.appLogTail(appname, 12); detail != "" {
-				return fmt.Errorf("应用 %s 创建了 Socket %s 后又异常退出\n原因（摘自日志）:\n%s",
-					appname, socketPath, detail)
+				return "", fmt.Errorf("应用 %s 创建了 Socket %s 后又异常退出\n原因（摘自日志）:\n%s",
+					appname, active, detail)
 			}
-			return fmt.Errorf("应用 %s 创建了 Socket %s 后又异常退出（详见日志: %s）",
-				appname, socketPath, m.cfg.AppLogFile(appname))
+			return "", fmt.Errorf("应用 %s 创建了 Socket %s 后又异常退出（详见日志: %s）",
+				appname, active, m.cfg.AppLogFile(appname))
 		}
 
 		// socket 存在且进程存活，且已过观察窗口 → 认为稳定
-		if exists && alive && time.Since(socketSeenAt) >= settle {
-			logger.Debug("Socket 已就绪: %s", socketPath)
-			return nil
+		if active != "" && alive && time.Since(socketSeenAt) >= settle {
+			logger.Debug("Socket 已就绪: %s", active)
+			return active, nil
 		}
 
 		time.Sleep(interval)
 	}
 
 	detail := m.appLogTail(appname, 12)
+	searched := strings.Join(candidates, "\n    ")
 	if detail != "" {
-		return fmt.Errorf("等待应用 %s 创建 Socket 超时（%s）\n最近的日志:\n%s", appname, socketPath, detail)
+		return "", fmt.Errorf("等待应用 %s 创建 Socket 超时，已检查以下路径：\n    %s\n最近的日志:\n%s",
+			appname, searched, detail)
 	}
-	return fmt.Errorf("等待应用 %s 创建 Socket 超时（%s），请检查日志: %s",
-		appname, socketPath, m.cfg.AppLogFile(appname))
+	return "", fmt.Errorf("等待应用 %s 创建 Socket 超时，已检查以下路径：\n    %s\n请检查日志: %s",
+		appname, searched, m.cfg.AppLogFile(appname))
 }
 
 // readAppLog 读取应用日志内容。
