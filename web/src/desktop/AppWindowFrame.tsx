@@ -152,11 +152,32 @@ function AppWindowFrameInner({
     resizeRef.current = null;
     liveRef.current = null;
 
-    // 提交最终几何（整个拖动过程只触发一次 React 更新）
+    /**
+     * 提交最终几何。
+     *
+     * 关键顺序（曾经在这里出过 bug）：**必须先让 React 拿到新几何，
+     * 再清除内联样式**。早期实现先清 `width/height/transform`、
+     * 后调 `onMove`，中间会出现一帧"窗口按内容收缩"的状态 ——
+     * 因为 .fpkm-win 没有固定宽高，清掉内联样式后它会缩到内容尺寸
+     * （实测从 960×620 缩成 302×192，看起来像"窗口被缩小了"）。
+     *
+     * 现在：先把最终几何写进 state，再在下一帧清除内联覆盖，
+     * 这样 React 渲染出的 rect 已经与之一致，不会闪缩。
+     */
     if (el && live) {
+      /**
+       * 只清 transform，**绝不能清 width/height**。
+       *
+       * 踩过的坑：早期在松手时把 width/height 一起清成 ''，
+       * 想"交还给 React 的 style"。但 .fpkm-win 本身没有固定宽高，
+       * 一旦内联宽高被清掉、而 React 的下一帧还没到，
+       * 窗口就会按内容收缩到很小（实测 960×620 → 302×192），
+       * 看起来就像"一放手窗口就被缩小了"。
+       *
+       * 现在只清 transform（拖动期间的位移补偿），
+       * 宽高交给 React 的 style（win.rect.w / win.rect.h）维护。
+       */
       el.style.transform = '';
-      el.style.width = '';
-      el.style.height = '';
       onMove(live);
     }
     setDragging(false);

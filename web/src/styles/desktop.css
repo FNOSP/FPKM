@@ -196,6 +196,8 @@
 
 /* 标题栏：可拖动 */
 .fpkm-win-bar {
+  position: relative;
+  z-index: 6; /* 高于缩放手柄（5）：保证标题栏区域始终可拖动 */
   height: 40px;
   flex-shrink: 0;
   display: flex;
@@ -331,18 +333,41 @@
   cursor: grabbing;
 }
 
-/* 八向缩放手柄 */
+/* ---------- 八向缩放手柄 ----------
+
+   重要：手柄不能压住标题栏。
+
+   之前的 bug（实测现象）：拖动窗口后窗口突然变成很小的一块。
+   原因不是"最小化"，而是**误触了缩放**：`.fpkm-win-resize-n`
+   原本 `top:-3px; height:6px` 且 `z-index:5`，而标题栏 `z-index:3` ——
+   也就是说窗口顶部 3px **实际落在缩放条上**，而不是标题栏。
+   用户从标题栏最上沿按下想拖动，结果是"从顶部缩放"，
+   往下拖就把窗口越缩越小（直到 MIN_W×MIN_H）。
+
+   修法：
+   1. 手柄不再跨越标题栏区域：`n` 条让出标题栏高度（top 从 40px 起）；
+   2. 降低手柄层级到标题栏之下（拖动手势优先）；
+   3. 顶部角落手柄限制在标题栏以下，避免与窗口按钮抢点击。
+   ------------------------------------------------------------ */
+
 .fpkm-win-resize {
   position: absolute;
-  z-index: 5;
+  z-index: 5; /* 高于内容区与遮罩，保证边角可抓 */
 }
 
-.fpkm-win-resize-n { top: -3px; left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
+/* 但顶部手柄必须让位给标题栏：标题栏区域的拖动优先。
+   做法是把顶部手柄的命中区域限制在标题栏**下沿以下**，
+   因此这里不靠 z-index 竞争，而是直接避开标题栏所占的空间。 */
+
+/* 顶部：从标题栏下沿开始，不与标题栏重叠 */
+.fpkm-win-resize-n { top: 40px; left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
 .fpkm-win-resize-s { bottom: -3px; left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
 .fpkm-win-resize-e { right: -3px; top: 8px; bottom: 8px; width: 6px; cursor: ew-resize; }
 .fpkm-win-resize-w { left: -3px; top: 8px; bottom: 8px; width: 6px; cursor: ew-resize; }
-.fpkm-win-resize-ne { top: -3px; right: -3px; width: 12px; height: 12px; cursor: nesw-resize; }
-.fpkm-win-resize-nw { top: -3px; left: -3px; width: 12px; height: 12px; cursor: nwse-resize; }
+
+/* 顶部两角同样下移到标题栏之下，避免遮挡窗口按钮 */
+.fpkm-win-resize-ne { top: 40px; right: -3px; width: 12px; height: 12px; cursor: nesw-resize; }
+.fpkm-win-resize-nw { top: 40px; left: -3px; width: 12px; height: 12px; cursor: nwse-resize; }
 .fpkm-win-resize-se { bottom: -3px; right: -3px; width: 12px; height: 12px; cursor: nwse-resize; }
 .fpkm-win-resize-sw { bottom: -3px; left: -3px; width: 12px; height: 12px; cursor: nesw-resize; }
 
