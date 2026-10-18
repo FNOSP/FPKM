@@ -638,9 +638,31 @@ func (m *Manager) Start(appname string) error {
 	// 或前缀写成了 /app/{appname}），start 时也会自动修正。
 	// 注意 gatewayPrefix 与 url 是两回事：
 	//   fnchat: gatewayPrefix=/app/fnchat, url=/app/fnchat/  → 打开要带尾斜杠
-	if env["SOCKET_PATH"] != "" {
+	// 注意外层条件不能是 env["SOCKET_PATH"] != ""。
+	// 旧版本的 .env 可能残留了错误的 SOCKET_PATH（例如把端口型应用
+	// Lucky 误标成网关应用），而 ui/config 里根本没有 gatewaySocket。
+	// 若以外层 != "" 为条件，就永远进不来、也永远清不掉，
+	// 启动时会一直等一个永远不会出现的 app.sock 直到超时。
+	{
 		targetDirCheck := m.cfg.AppTargetDir(appname)
-		if gatewaySocket := readGatewaySocketFromUIConfig(targetDirCheck, appDir); gatewaySocket != "" {
+		gatewaySocket := readGatewaySocketFromUIConfig(targetDirCheck, appDir)
+		if gatewaySocket == "" {
+			// ui/config 明确不是网关应用：清理旧版本可能写错的网关字段。
+			if env["SOCKET_PATH"] != "" || env["GATEWAY_PREFIX"] != "" || env["TRIM_SERVICE_SOCKET"] != "" {
+				logger.Info("ui/config 未声明 gatewaySocket，清理残留的网关配置（应用类型为端口型）")
+				env["SOCKET_PATH"] = ""
+				env["GATEWAY_PREFIX"] = ""
+				env["TRIM_SERVICE_SOCKET"] = ""
+				env["LAUNCH_PATH"] = ""
+				if env["TRIM_SERVICE_PORT"] == "" {
+					if p := readPortFromUIConfig(targetDirCheck, appDir); p != "" {
+						env["TRIM_SERVICE_PORT"] = p
+						env["port"] = p
+					}
+				}
+				SaveEnvFile(m.cfg.AppEnvFile(appname), env)
+			}
+		} else {
 			wantPrefix := readGatewayPrefixFromUIConfig(targetDirCheck, appDir)
 			if wantPrefix == "" {
 				wantPrefix = "/app/" + appname

@@ -165,6 +165,93 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.74 修复端口型应用误等 Socket 超时（Lucky 第二次事故）
+
+权限修好之后，Lucky 报：
+
+```
+WARN 应用已安装，但自动启动失败: 等待应用 Lucky 创建 Socket 超时
+     （/root/.local/fpk/apps/Lucky/target/app.sock）
+最近的日志: ... LuckyWeb Start success ... EnableFireWallPorts Done!
+```
+
+**注意日志**：`LuckyWeb Start success` —— 应用其实**已经启动成功**了，
+是 fpkm 一直在等一个永远不会出现的 `app.sock`，等满 30 秒才报超时。
+
+#### 根因：端口型应用被误当成网关（socket）应用
+
+Lucky 的 `ui/config` 明确声明为**端口型**：
+
+```json
+".url": { "Lucky.Application": {
+  "type": "url", "protocol": "http", "port": "${port}" } }
+```
+
+它没有 `gatewaySocket` 字段。但旧的 `.env` 里残留了
+
+```
+SOCKET_PATH=/root/.local/fpk/apps/Lucky/target/app.sock
+GATEWAY_PREFIX=/app/Lucky
+```
+
+于是 `Start()` 里这个判断成立，进入等待 socket 的分支：
+
+```go
+if socketPath != "" && env["GATEWAY_PREFIX"] != "" {
+    waitForSocket(...)   // 等 30 秒，必然超时
+}
+```
+
+#### 为什么"以 ui/config 为准"的修正没生效
+
+启动时本来有一段纠正逻辑，但外层条件是：
+
+```go
+if env["SOCKET_PATH"] != "" {          // ← 问题
+    if gatewaySocket := readGatewaySocketFromUIConfig(...); gatewaySocket != "" {
+        // 修正 prefix / socket
+    }
+}
+```
+
+内层要求 `ui/config` **有** `gatewaySocket` 才会修正。
+Lucky 没有这个字段，内层进不去；而外层又只在 `SOCKET_PATH != ""` 时执行 ——
+结果**永远清不掉**错误的残留值。
+
+#### 修法
+
+进入该逻辑不再以 `SOCKET_PATH != ""` 为前提，改为**始终读取 ui/config**：
+
+- `ui/config` **有** `gatewaySocket` → 按它修正 prefix / socket / launch path（原逻辑）；
+- `ui/config` **无** `gatewaySocket` → 说明这是端口型应用，
+  把 `.env` 里残留的 `SOCKET_PATH` / `GATEWAY_PREFIX` /
+  `TRIM_SERVICE_SOCKET` / `LAUNCH_PATH` 一并清空，并回填端口。
+
+端口型应用因此不会再进入等待 socket 的分支。
+
+#### 实测
+
+把正确安装的 `.env` 人为改坏（注入 `SOCKET_PATH` + `GATEWAY_PREFIX`）后启动：
+
+```
+[INFO] ui/config 未声明 gatewaySocket，清理残留的网关配置（应用类型为端口型）
+[OK]   应用 Lucky 已启动 (PID: 2283656, 端口: 16602)
+耗时 0.0s          ← 从"等 30 秒超时"变成立即成功
+```
+
+清理后的 `.env`：
+
+```
+SOCKET_PATH=
+GATEWAY_PREFIX=
+TRIM_SERVICE_SOCKET=
+LAUNCH_PATH=
+TRIM_SERVICE_PORT=16602
+```
+
+同时确认真正的网关应用（`fn-appstores-client`）配置**未被误清**，
+仍保有 `SOCKET_PATH` 与 `GATEWAY_PREFIX`。
+
 ### 0.73 修复应用启动报 permission denied（Lucky 事故）
 
 **现象**：
