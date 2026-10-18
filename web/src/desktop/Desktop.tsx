@@ -6,6 +6,7 @@ import { buildAccessURL } from '../utils/format';
 import AppWindowFrame, { type AppWindow, type WindowRect } from './AppWindowFrame';
 import Taskbar from './Taskbar';
 import { useDock } from './dock';
+import { clampRect, loadWindowRect, saveWindowRect } from './windowRect';
 import Widgets from './Widgets';
 
 interface Props {
@@ -46,6 +47,28 @@ const STORE_ICON: DesktopIcon = {
 
 const DEFAULT_W = 960;
 const DEFAULT_H = 620;
+
+/**
+ * 应用商店窗口的初始尺寸（目标是应用列表稳排 3 列）。
+ *
+ * 实测出来的数字，别凭理论拍：
+ *   .fpkm-grid 用 repeat(auto-fill, minmax(320px, 1fr))，gap 14px。
+ *   理论 3 列需 3×320 + 2×14 = 988px，但浏览器取整后
+ *   **网格宽度必须 ≥ 1000px 才真的排 3 列**（986px 仍是 2 列）。
+ *
+ * 窗口内还要减去：
+ *   208px 侧边栏 + 内容区左右 padding（约 44px）
+ *
+ * 因此窗口宽度需 ≥ 1000 + 208 + 44 ≈ 1252，这里取 1320 留些余量
+ *（也考虑到滚动条占位）。默认 960 宽只能排 2 列，故商店单独给更宽初值。
+ */
+const STORE_W = 1320;
+const STORE_H = 820;
+
+/** 级联偏移：每多开一个窗口，右上向下错开的距离 */
+const CASCADE_STEP = 30;
+/** 级联错开到第几个后回到起点，避免一直往右下跑出屏幕 */
+const CASCADE_WRAP = 8;
 
 /** FPKM 桌面：壁纸 + 图标网格 + 子窗口 + 玻璃任务栏 + 小组件 */
 export default function Desktop({
@@ -157,8 +180,20 @@ export default function Desktop({
     setWindows((ws) => ws.filter((w) => w.id !== id));
   }, []);
 
+  /**
+   * 更新窗口几何，并持久化到 localStorage。
+   *
+   * 只在"非最大化"时保存：最大化状态下 rect 是整屏尺寸，
+   * 写进去会导致下次打开该应用也变成全屏。
+   */
   const updateRect = useCallback((id: string, rect: WindowRect) => {
-    setWindows((ws) => ws.map((w) => (w.id === id ? { ...w, rect } : w)));
+    setWindows((ws) => {
+      const target = ws.find((w) => w.id === id);
+      if (target && !target.maximized) {
+        saveWindowRect(id, rect);
+      }
+      return ws.map((w) => (w.id === id ? { ...w, rect } : w));
+    });
   }, []);
 
   const toggleMaximize = useCallback(
@@ -167,8 +202,14 @@ export default function Desktop({
         ws.map((w) => {
           if (w.id !== id) return w;
           if (w.maximized) {
-            return { ...w, maximized: false, rect: w.restore ?? w.rect, restore: undefined };
+            // 还原：把还原后的几何写回存储
+            const back = w.restore ?? w.rect;
+            saveWindowRect(id, back);
+            return { ...w, maximized: false, rect: back, restore: undefined };
           }
+          // 进入最大化前，记下"普通状态"的几何，
+          // 这样下次打开仍是用户调整过的大小
+          saveWindowRect(id, w.rect);
           return {
             ...w,
             maximized: true,
@@ -189,11 +230,45 @@ export default function Desktop({
         focusWindow(ic.key);
         return;
       }
-      const w = Math.min(DEFAULT_W, bounds.w - 40);
-      const h = Math.min(DEFAULT_H, bounds.h - 40);
+
+      const isStore = ic.builtin === 'store';
+      // 商店用更宽的初始尺寸，保证应用列表能排 3 列；其它应用用默认值
+      const wantW = isStore ? STORE_W : DEFAULT_W;
+      const wantH = isStore ? STORE_H : DEFAULT_H;
+      const w = Math.min(wantW, bounds.w - 40);
+      const h = Math.min(wantH, bounds.h - 40);
+
+      // 优先用上次保存的几何（同一应用再次打开时回到原位置）
+      const saved = loadWindowRect(ic.key);
+
+      /**
+       * 级联定位：不重叠 + 固定错开量。
+       *
+       * 只"按各自尺寸居中 + 加偏移"是不够的：不同尺寸的窗口
+       * （如商店 1320 宽、普通应用 960 宽）居中基线本身就不同，
+       * 叠加偏移后错开量会变成 200px 以上，看起来不像级联。
+       *
+       * 这里改为：以**第一个窗口的位置**为基准，第 n 个窗口
+       * 相对它固定错开 n×30px。没有已开窗口时才用居中基线。
+       */
+      const step = (windows.length % CASCADE_WRAP) * CASCADE_STEP;
+
+      // 已有窗口时，以最早那个窗口为锚点，保证错开量稳定
+      const anchor = windows.length > 0 ? windows[0].rect : null;
+      const baseX = anchor
+        ? anchor.x
+        : Math.max(12, (bounds.w - w) / 2 - 60);
+      const baseY = anchor
+        ? anchor.y
+        : Math.max(8, (bounds.h - h) / 2 - 30);
+
+      const x = Math.min(Math.max(0, baseX + step), Math.max(0, bounds.w - w));
+      const y = Math.min(Math.max(0, baseY + step), Math.max(0, bounds.h - h));
+
+      const rect = saved ? clampRect(saved, bounds) : { x, y, w, h };
+
       const nz = zTop + 1;
       setZTop(nz);
-      const isStore = ic.builtin === 'store';
       setWindows((ws) => [
         ...ws,
         {
@@ -203,12 +278,7 @@ export default function Desktop({
           url: ic.target ?? '',
           // 商店：打标记，渲染时再生成内容（避免缓存成陈旧快照）
           builtin: isStore ? 'store' : undefined,
-          rect: {
-            x: Math.max(12, (bounds.w - w) / 2 - 60),
-            y: Math.max(8, (bounds.h - h) / 2 - 30),
-            w,
-            h,
-          },
+          rect,
           z: nz,
           minimized: false,
           maximized: false,
