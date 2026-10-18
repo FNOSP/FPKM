@@ -336,6 +336,20 @@ body {
 
 /* ---------- 侧边栏 ---------- */
 
+/* ---------- 侧边栏（含滚动条样式） ----------
+
+   应用商店在桌面子窗口里打开时，侧边栏高度有限会出现滚动条。
+   系统默认滚动条又粗又深，很抢眼。
+
+   需求：
+   - 平时隐藏，鼠标移到侧边栏才显示；
+   - 更细、颜色为半透明灰；
+   - Firefox 用标准属性，WebKit 用 ::-webkit-scrollbar。
+
+   实现：默认把滑块设为透明（仍保留滚动能力），
+   .fpkm-side:hover 时再显示。滚动条本身预留 6px 宽度，
+   不会因为突然出现/消失导致内容左右跳动。
+   ------------------------------------------------------------ */
 .fpkm-side {
   width: 208px;
   flex-shrink: 0;
@@ -344,6 +358,61 @@ body {
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  /* 不预留 gutter：侧边栏大多数时候不溢出，
+     强制预留会让内容区凭空窄 6px。这里接受"出现滚动条时轻微位移"。 */
+
+  /* 注意：这里**不设置**标准的 scrollbar-width / scrollbar-color。
+     Chrome 一旦看到 scrollbar-color 就会改用标准滚动条渲染，
+     那套渲染不认 ::-webkit-scrollbar-thumb 的 hover 规则，
+     导致"平时透明、悬停显现"的效果失效（实测如此）。
+     只在 @supports not selector(::-webkit-scrollbar) 的 Firefox 分支里设置。 */
+}
+
+/* Firefox：标准属性（Chrome/Safari 走下面的 WebKit 伪元素） */
+@supports not selector(::-webkit-scrollbar) {
+  .fpkm-side {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+  .fpkm-side:hover {
+    scrollbar-color: rgba(0, 0, 0, 0.22) transparent;
+  }
+}
+
+/* WebKit（Chrome / Edge / Safari）：默认透明，悬停时显现 */
+.fpkm-side::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.fpkm-side::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.fpkm-side::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+  /* 让颜色变化更柔和 */
+  transition: background-color 0.15s ease;
+}
+
+.fpkm-side:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.22);
+}
+
+.fpkm-side::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.35);
+}
+
+/* 去掉两端箭头按钮（旧版 WebKit 会显示） */
+.fpkm-side::-webkit-scrollbar-button {
+  display: none;
+}
+
+.fpkm-side::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .fpkm-side-brand {

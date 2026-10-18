@@ -165,6 +165,63 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.68 壁纸恢复正常亮度 + 侧边栏滚动条精细化
+
+#### 1. 壁纸被压暗的问题
+
+0.66 给桌面加了一层"暗色薄纱"（scrim）：
+
+```css
+/* 旧值：整屏 0.28~0.5 的黑，把明亮的云海壁纸压成灰黑色 */
+background: linear-gradient(180deg, rgba(6,12,24,.42), rgba(6,12,24,.28) 45%, rgba(6,12,24,.5)), ...;
+```
+
+实测桌面中部亮度只有 **111**（原图约 137），确实明显发黑。
+
+改为**很轻的整体微压**（0.12 → 0.02 → 0.14），实测亮度回到 **151**，
+壁纸恢复通透感。
+
+> 代价是图标标签在亮云区域对比度下降。解决方式不是再压暗壁纸，
+> 而是给标签加局部暗底（`background: rgba(6,12,24,.45)` + 圆角 + 内边距），
+> 只压文字周围那一小块，兼顾壁纸亮度与可读性。
+
+#### 2. 侧边栏滚动条
+
+应用商店在子窗口里高度有限，侧边栏会出现滚动条。原来的原生滚动条又粗又深。
+
+目标：**平时隐藏、悬停显现、6px 宽、半透明灰**。
+
+实现要点（踩过的坑）：
+
+```css
+/* ✗ 错误做法：同时写标准属性与 WebKit 伪元素 */
+.fpkm-side { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.fpkm-side::-webkit-scrollbar-thumb { background-color: transparent; }
+.fpkm-side:hover::-webkit-scrollbar-thumb { background-color: rgba(0,0,0,.22); }
+```
+
+Chrome 一旦读到 `scrollbar-color` 就切换到**标准滚动条渲染**，
+那套渲染不认 `::-webkit-scrollbar-thumb` 的悬停规则，
+导致滑块恒为透明 —— 实测悬停后 `scrollbar-color` 变了、像素却没变化。
+
+正确做法：**Chrome/Safari 只用 WebKit 伪元素**，
+标准属性放进 `@supports not selector(::-webkit-scrollbar)` 的 Firefox 分支：
+
+```css
+@supports not selector(::-webkit-scrollbar) {
+  .fpkm-side { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+  .fpkm-side:hover { scrollbar-color: rgba(0,0,0,.22) transparent; }
+}
+
+.fpkm-side::-webkit-scrollbar { width: 6px; }
+.fpkm-side::-webkit-scrollbar-thumb { background-color: transparent; border-radius: 3px; }
+.fpkm-side:hover::-webkit-scrollbar-thumb { background-color: rgba(0,0,0,.22); }
+.fpkm-side::-webkit-scrollbar-thumb:hover { background-color: rgba(0,0,0,.35); }
+```
+
+实测（Chromium）：滚动条宽度 `6px`、空闲滑块 `rgba(0,0,0,0)`、
+标准属性保持 `auto`（说明走的是 WebKit 分支）、悬停后滑块变为半透明灰。
+
 ### 0.67 修复：拖动窗口后窗口突然变小
 
 **现象**：拖动子窗口，一松手窗口就缩成很小一块（约 300×190），
