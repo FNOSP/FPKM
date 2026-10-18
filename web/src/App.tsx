@@ -70,6 +70,8 @@ const { Text } = Typography;
 
 /** 侧边栏视图 */
 type View = 'home' | 'all' | 'installed' | 'detail';
+/** 详情页的来源视图；'desktop' 表示从桌面右键进入 */
+type DetailOrigin = View | 'desktop';
 
 /** 表示"全部分类" */
 const ALL_CATEGORY = '__all__';
@@ -79,13 +81,37 @@ export default function App() {
   const [needsSetup, setNeedsSetup] = useState(false);
   const [needLogin, setNeedLogin] = useState(false);
 
+
   // 顶层模式：desktop=FPKM 桌面（默认）；store=应用商店（全屏）
   const [mode, setMode] = useState<'desktop' | 'store'>('desktop');
+
   const [view, setView] = useState<View>('home');
   // 详情页目标：已安装应用名 或 商店条目 id
   const [detailTarget, setDetailTarget] = useState<{ appname?: string; storeId?: string } | null>(null);
   // 详情页来源视图，返回时回到原处（商店列表 / 已安装列表）
-  const [detailFrom, setDetailFrom] = useState<View>('home');
+  const [detailFrom, setDetailFrom] = useState<DetailOrigin>('home');
+
+  /**
+   * 页面标题随"当前属于哪一层界面"切换。
+   *
+   *   - 登录页、桌面：FPKM 桌面
+   *   - 应用商店作为独立应用打开：FPKM 应用商店
+   *
+   * 注意 `mode === 'store'` 有两种来源：
+   *   1. 商店真的是独立界面（用户从桌面切过去）；
+   *   2. **桌面右键 →「应用详情」**：它复用了商店外壳渲染详情页，
+   *      但用户心理上仍在桌面上。
+   * 第 2 种如果也叫"FPKM 应用商店"会很突兀，因此用 detailFrom
+   * 判断：来自桌面的详情页仍算桌面。
+   *
+   * 桌面上开着商店**窗口**时也保持 FPKM 桌面 ——
+   * 否则浏览器标签页会在开关窗口时来回跳字。
+   */
+  useEffect(() => {
+    const fromDesktop = mode === 'desktop' || detailFrom === 'desktop';
+    document.title =
+      needLogin || fromDesktop ? 'FPKM 桌面' : 'FPKM 应用商店';
+  }, [needLogin, mode, detailFrom]);
   const [category, setCategory] = useState<string>(ALL_CATEGORY);
   const [keyword, setKeyword] = useState('');
   const [meta, setMeta] = useState<MetaInfo | null>(null);
@@ -616,7 +642,7 @@ export default function App() {
 
   const openAppDetailFromDesktop = (name: string) => {
     blurActive();
-    setDetailFrom('desktop' as View);
+    setDetailFrom('desktop');
     setDetailTarget({ appname: name });
     // 详情页仍复用商店外壳，因此切到 store 模式
     setMode('store');
@@ -926,7 +952,7 @@ export default function App() {
               busy={loading}
               onBack={() => {
                 setDetailTarget(null);
-                setView(detailFrom);
+                setView(detailFrom === 'desktop' ? 'home' : detailFrom);
               }}
               onAction={runAction}
               onInstall={(id) => doStoreInstall({ id, name: '' })}

@@ -62,15 +62,28 @@ export default function Desktop({
   const [selected, setSelected] = useState<string | null>(null);
   const [stats, setStats] = useState<SystemStats | null>(null);
   const desktopRef = useRef<HTMLDivElement>(null);
+  /** 整个桌面（含任务栏区域）：窗口的可拖放边界 */
+  const rootRef = useRef<HTMLDivElement>(null);
   const [bounds, setBounds] = useState({ w: 1280, h: 720 });
 
   /* 任务栏（Dock）隐藏列表：与商店「已安装」列表共享同一份状态，
      这样从任务栏移除后仍可在商店里恢复。 */
   const dock = useDock();
 
-  /** 桌面可用区域（减去任务栏高度） */
+  /**
+   * 可拖放区域 = **整个桌面**（含任务栏所占的底部区域）。
+   *
+   * 之前用 .fpkm-desktop-area（inset 0 0 76px 0）作为 bounds，
+   * 结果是窗口永远拖不到任务栏上方，且该容器 overflow:hidden
+   * 会把窗口超出部分裁掉。
+   *
+   * 现在的约定：
+   *   - 窗口层与任务栏是 .fpkm-desktop 的同级子元素；
+   *   - bounds 取整个桌面的尺寸，窗口可以盖到任务栏位置；
+   *   - 任务栏 z-index 固定高于窗口层，保证它**永远在最顶层**。
+   */
   const measure = useCallback(() => {
-    const el = desktopRef.current;
+    const el = rootRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
     setBounds({ w: Math.round(r.width), h: Math.round(r.height) });
@@ -304,7 +317,7 @@ export default function Desktop({
   }, [windows]);
 
   return (
-    <div className={`fpkm-desktop ${selected ? 'fpkm-desktop-selected' : ''}`}>
+    <div ref={rootRef} className={`fpkm-desktop ${selected ? 'fpkm-desktop-selected' : ''}`}>
       {/* 桌面区域：图标网格 + 子窗口 */}
       <div className="fpkm-desktop-area" ref={desktopRef} onClick={() => setSelected(null)}>
         {/* 图标网格：先排满第一列再排第二列（grid-auto-flow: column） */}
@@ -386,6 +399,17 @@ export default function Desktop({
           </div>
         ) : null}
 
+
+        {/* 右侧小组件（像图片里那样贴在桌面右上） */}
+        <Widgets stats={stats} apps={apps} />
+      </div>
+
+      {/* 子窗口层：与任务栏同级（不在 .fpkm-desktop-area 内）。
+          原因：
+            1. 那个容器 overflow:hidden，会把拖到底部的窗口裁掉；
+            2. 它的高度不含任务栏，bounds 因此永远到不了任务栏位置。
+          任务栏的 z-index 高于本层，所以窗口不会盖住任务栏。 */}
+      <div className="fpkm-window-layer">
         {windows.map((w) => (
           <AppWindowFrame
             key={w.id}
@@ -410,9 +434,6 @@ export default function Desktop({
             }
           />
         ))}
-
-        {/* 右侧小组件（像图片里那样贴在桌面右上） */}
-        <Widgets stats={stats} apps={apps} />
       </div>
 
       {/* 玻璃质感任务栏 */}
