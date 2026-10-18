@@ -165,6 +165,74 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.75 修复网关应用带端口启动导致 Socket 超时（Lucky 3.0.2）
+
+**背景更正**：0.74 误用了旧包 `Lucky_x86.fpk`（3.0.0，端口型）做诊断，
+结论"Lucky 是端口型应用"是错的。
+
+`Lucky 3.0.2` 的实际 `ui/config` 是**网关型**：
+
+```json
+"type": "iframe", "gatewayPrefix": "/app/Lucky",
+"gatewaySocket": "app.sock", "url": "/app/Lucky/"
+```
+
+#### 真正的根因：网关应用带着端口启动
+
+对比 `.env` 就能看出问题：
+
+| 字段 | 故障的 Lucky | 正常的网关应用 |
+|------|-------------|---------------|
+| `TRIM_SERVICE_PORT` | `16601` | 空 |
+| `port` | `16601` | 空 |
+| `UI_PORT` | `16601` | 空 |
+| `SOCKET_PATH` | `target/app.sock` | `target/app.sock` |
+
+应用读到端口就按 **TCP 模式**运行、根本不创建 unix socket；
+fpkm 却按 `SOCKET_PATH` 在 `target/app.sock` 上空等 30 秒，
+最后报"等待应用创建 Socket 超时"，而应用日志里明明是
+`LuckyWeb Start success`。
+
+端口字段的清空**只在 install 路径做过**（0.61 加入），
+`Start()` 里的"以 ui/config 为准修正 env"这段逻辑漏了这一步。
+于是从旧版本升级上来的应用会一直失败。
+
+#### 修法
+
+在网关修正分支里补上端口清理：
+
+```go
+for _, k := range []string{"TRIM_SERVICE_PORT", "port", "UI_PORT"} {
+    if env[k] != "" {
+        logger.Info("网关应用不应带端口，已清理 %s=%s (以 ui/config 为准)", k, env[k])
+        env[k] = ""
+        changed = true
+    }
+}
+```
+
+只对 `ui/config` 声明了 `gatewaySocket` 的应用生效；
+端口型应用（如 `Lucky 3.0.0`）完全不受影响。
+
+#### 实测
+
+把 Lucky 的 `.env` 人为恢复成"端口 16601 + 网关字段"故障状态后启动：
+
+```
+[INFO] 网关应用不应带端口，已清理 TRIM_SERVICE_PORT=16601 (以 ui/config 为准)
+[INFO] 网关应用不应带端口，已清理 port=16601 (以 ui/config 为准)
+[INFO] 网关应用不应带端口，已清理 UI_PORT=16601 (以 ui/config 为准)
+[OK]   应用 Lucky 已启动 (PID: 2326651)      ← 不再显示端口
+```
+
+修复后 `.env`：三个端口字段全部为空，`SOCKET_PATH` / `GATEWAY_PREFIX` 保留。
+
+并确认真正的网关应用 `fn-appstores-client`（port 为空、socket 正常）未被影响。
+
+> 说明：测试机上用 3.0.0 的二进制做端到端启动会段错误退出（退出码 139），
+> 那是该二进制与本机环境不兼容，与本次修复无关；
+> 本次验证聚焦"端口是否被正确清理"这一逻辑点。
+
 ### 0.74 修复端口型应用误等 Socket 超时（Lucky 第二次事故）
 
 权限修好之后，Lucky 报：

@@ -689,6 +689,23 @@ func (m *Manager) Start(appname string) error {
 				env["TRIM_SERVICE_SOCKET"] = wantSocket
 				changed = true
 			}
+
+			// 网关应用**不能带端口**。
+			//
+			// 真实故障：Lucky 3.0.2 是网关应用（ui/config 有 gatewaySocket），
+			// 但旧版本安装时 .env 里留下了 TRIM_SERVICE_PORT=16601。
+			// 应用启动时读到端口就以 TCP 模式运行、根本不去创建 unix socket，
+			// fpkm 却在 target/app.sock 上空等 30 秒后报 "等待 Socket 超时"。
+			// 端口字段的清空只在 install 路径做过，start 的修正逻辑漏了这一步，
+			// 于是升级上来的应用会一直失败。
+			for _, k := range []string{"TRIM_SERVICE_PORT", "port", "UI_PORT"} {
+				if env[k] != "" {
+					logger.Info("网关应用不应带端口，已清理 %s=%s (以 ui/config 为准)", k, env[k])
+					env[k] = ""
+					changed = true
+				}
+			}
+
 			if changed {
 				SaveEnvFile(m.cfg.AppEnvFile(appname), env)
 			}
