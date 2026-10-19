@@ -165,18 +165,50 @@ resizable, with the taskbar always on top:
 
 <img src="docs/screenshots/login.webp" alt="Login" width="760">
 
-## Docker
+## Docker deployment
+
+Image: **`qilinzhu/fpkm`** (supports `linux/amd64` / `linux/arm64`)
+
+### docker run
 
 ```bash
-docker run -d --name fpkm -p 7666:7666 \
+docker run -d \
+  --name fpkm \
+  -p 7666:7666 \
   -v /path/to/fpkm-data:/app/data \
   --restart unless-stopped \
   qilinzhu/fpkm:latest
 ```
 
-Supports `linux/amd64` and `linux/arm64`. The data volume must be mounted,
-otherwise rebuilding the container loses installed applications.
+### docker compose
 
+```yaml
+services:
+  fpkm:
+    image: qilinzhu/fpkm:latest
+    container_name: fpkm
+    ports:
+      - "7666:7666"
+    volumes:
+      # Required: without this you lose installed apps and the password on recreate
+      - ./fpkm-data:/app/data
+    restart: unless-stopped
+```
+
+Save as `compose.yaml`, then:
+
+```bash
+docker compose up -d
+```
+
+Either way, open `http://<host-ip>:7666` — the first visit asks you to set an
+admin password.
+
+> **The data volume is mandatory.** Applications, the password, and sources all
+> live under `/app/data`; without a mount, `docker rm` wipes everything.
+
+The image is based on `debian-slim`, not alpine — some ELFs inside real `.fpk`
+packages link against glibc, which fails outright under alpine's musl.
 See [Docker deployment](docs/DOCKER.md) for details.
 
 ## Quick start
@@ -208,7 +240,7 @@ cd dist
 The first visit asks you to set an admin password; after that you can install
 applications.
 
-## Compatibility notes
+## Known limitations
 
 FPKM aims to run real `.fpk` packages wherever possible, but the fnOS ecosystem
 contains vendor-private mechanisms. These are the known boundaries:
@@ -248,6 +280,45 @@ on the host.
 - Only install `.fpk` packages from sources you trust
 - Never expose the admin port directly to the internet; use a reverse proxy with HTTPS
 - The admin password is stored salted with PBKDF2-HMAC-SHA256, but still use a strong one
+
+## Compatibility & test results
+
+FPKM cannot guarantee that every `.fpk` package runs perfectly — the fnOS
+ecosystem contains vendor-private mechanisms, and applications are implemented in
+very different ways. **Which apps work, and which need workarounds**, cannot be
+covered by one person's testing, so we maintain a public spreadsheet of real-world
+results:
+
+### 📋 [FPKM application compatibility list](https://www.kdocs.cn/l/ceGUrJxQZoOM)
+
+It records how each application actually behaves: whether it installs, whether it
+starts, which access mode works, and any issues plus their solutions. Check it
+before installing to save yourself some detours.
+
+### Contributions welcome
+
+If you have successfully (or unsuccessfully) run a `.fpk`, please report it in
+[Issues](https://github.com/FNOSP/FPKM/issues) — a couple of data points is
+genuinely useful to everyone who comes after you.
+
+Please include:
+
+| Item | Notes |
+|------|-------|
+| App name & version | e.g. `fnos-quark 0.7` |
+| System environment | Distro and version (e.g. `Ubuntu 24.04` / `Debian 12`), CPU architecture |
+| FPKM version | Output of `./fpkm version` |
+| Result | ✅ works / ⚠️ partially works / ❌ does not run |
+| Access mode | Unified gateway / direct port / CGI |
+| Issues & logs | Error messages, relevant excerpts from `data/logs/` |
+| Workaround | If you got it working, describe how |
+
+> Please search for an existing report first to avoid duplicates.
+> Fixes to inaccurate entries in the spreadsheet are also welcome.
+
+If you hit a problem, also check the known boundaries in
+[Known limitations](#known-limitations) and the specific error the web UI
+reports.
 
 ## Acknowledgements
 

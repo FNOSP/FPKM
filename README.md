@@ -164,16 +164,47 @@ Windows / macOS / Linux 均可运行（`fpkm.exe`、`fpkm` 同名命令）。
 
 ## Docker 部署
 
+镜像：**`qilinzhu/fpkm`**（支持 `linux/amd64` / `linux/arm64`）
+
+### docker run
+
 ```bash
-docker run -d --name fpkm -p 7666:7666 \
+docker run -d \
+  --name fpkm \
+  -p 7666:7666 \
   -v /path/to/fpkm-data:/app/data \
   --restart unless-stopped \
   qilinzhu/fpkm:latest
 ```
 
-支持 `linux/amd64` 与 `linux/arm64`。数据目录必须挂载，否则重建容器会丢失已安装应用。
+### docker compose
 
-详见 [Docker 部署文档](docs/DOCKER.md)。
+```yaml
+services:
+  fpkm:
+    image: qilinzhu/fpkm:latest
+    container_name: fpkm
+    ports:
+      - "7666:7666"
+    volumes:
+      # 必须持久化，否则重建容器会丢失已安装应用与密码
+      - ./fpkm-data:/app/data
+    restart: unless-stopped
+```
+
+保存为 `compose.yaml` 后：
+
+```bash
+docker compose up -d
+```
+
+两种方式启动后，浏览器打开 `http://<宿主机IP>:7666`，首次访问设置管理密码。
+
+> **数据目录必须挂载**。FPKM 的应用、密码、应用源都存在 `/app/data`，
+> 不挂载的话 `docker rm` 后全部丢失。
+
+镜像基于 `debian-slim` 而非 alpine —— 实测部分 `.fpk` 内的 ELF 依赖 glibc，
+alpine 的 musl 环境会直接运行失败。详见 [Docker 部署文档](docs/DOCKER.md)。
 
 ## 快速开始
 
@@ -205,7 +236,7 @@ cd dist
 
 ---
 
-## 兼容性说明
+## 已知边界
 
 FPKM 的目标是**尽可能**跑起真实的 `.fpk` 包，但飞牛生态中存在一些
 厂商私有机制，属于已知边界：
@@ -247,6 +278,43 @@ FPKM 会安装并运行任意程序，等同于在本机执行代码。
 - 只安装来源可信的 `.fpk` 包
 - 不要把管理端口直接暴露到公网，建议配合反向代理与 HTTPS
 - 管理密码以 PBKDF2-HMAC-SHA256 加盐存储，但仍请使用强密码
+
+---
+
+## 应用兼容性与实测结果
+
+FPKM 无法保证每一个 `.fpk` 都能完美运行 —— 飞牛生态里存在厂商私有机制，
+不同应用的实现方式也千差万别。**哪些应用能跑、哪些需要变通**，靠一个人的
+测试是覆盖不完的，所以我们把实测结果整理成了一张公开表格：
+
+### 📋 [FPKM 应用兼容性查询表](https://www.kdocs.cn/l/ceGUrJxQZoOM)
+
+表格记录了每个应用的实际运行情况：能否安装、能否启动、访问方式、
+遇到的问题与解决办法。安装前先查一下，可以少走很多弯路。
+
+### 欢迎提交你的测试结果
+
+如果你成功（或失败）运行了某个 `.fpk`，非常欢迎反馈到
+[Issues](https://github.com/FNOSP/FPKM/issues) —— 一两条信息对后来者
+就是实打实的帮助。
+
+提交时建议附上：
+
+| 项目 | 说明 |
+|------|------|
+| 应用名称与版本 | 例如 `fnos-quark 0.7` |
+| 系统环境 | 发行版与版本（如 `Ubuntu 24.04` / `Debian 12`）、CPU 架构 |
+| FPKM 版本 | `./fpkm version` 的输出 |
+| 运行结果 | ✅ 完全正常 / ⚠️ 部分可用 / ❌ 无法运行 |
+| 访问方式 | 统一网关 / 端口直连 / CGI |
+| 问题与日志 | 报错信息、`data/logs/` 相关片段 |
+| 解决办法 | 若你已绕过问题，请写明做法 |
+
+> 提交前请先搜索是否已有相同应用的报告，避免重复；
+> 也欢迎直接修正兼容性表格中不准确的条目。
+
+如果遇到问题，也可以先看 [已知边界](#已知边界) 中的说明，
+以及 Web 界面给出的具体报错原因。
 
 ---
 
