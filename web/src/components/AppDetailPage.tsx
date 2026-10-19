@@ -19,6 +19,7 @@ import {
   IconExternalOpen,
   IconLink,
   IconChevronDown,
+  IconSetting,
 } from '@douyinfe/semi-icons';
 import type { AppDetail, StoreApp } from '../api/types';
 import { getAppDetail, getStoreDetail, iconURL } from '../api/client';
@@ -39,6 +40,8 @@ interface Props {
    * 使详情页的「打开」与桌面图标行为一致（子窗口 / 新标签页）。
    */
   onOpenApp?: (name: string) => void;
+  /** 打开「应用设置」弹窗（选择端口 / 网关 / CGI 接入方式） */
+  onOpenSettings?: (appname: string) => void;
 }
 
 const { Text, Title, Paragraph } = Typography;
@@ -75,6 +78,7 @@ export default function AppDetailPage({
   onAction,
   onInstall,
   onOpenApp,
+  onOpenSettings,
 }: Props) {
   const [detail, setDetail] = useState<AppDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -185,6 +189,7 @@ export default function AppDetailPage({
     }
 
     return (
+      <>
       <SplitButtonGroup className="fpkm-split-btn">
         {/* 主按钮：运行中→打开；未运行→启动 */}
         {detail.running ? (
@@ -247,6 +252,20 @@ export default function AppDetailPage({
           />
         </Dropdown>
       </SplitButtonGroup>
+
+      {/* 应用设置：放在「打开」分裂按钮右侧（参考飞牛应用设置入口） */}
+      {onOpenSettings ? (
+        <Button
+          size="small"
+          theme="light"
+          type="primary"
+          icon={<IconSetting />}
+          onClick={() => onOpenSettings(detail.name)}
+        >
+          应用设置
+        </Button>
+      ) : null}
+      </>
     );
   };
 

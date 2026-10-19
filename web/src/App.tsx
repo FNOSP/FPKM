@@ -416,6 +416,20 @@ export default function App() {
   };
 
   /** 打开已安装应用详情（记住来源视图，便于返回） */
+  /** 按应用名打开「应用设置」弹窗（详情页使用） */
+  const openSettingsByName = useCallback(
+    (appname: string) => {
+      const target = apps.find((a) => a.name === appname);
+      if (!target) {
+        // 详情页可能是从商店条目进入的，此时 apps 里未必有该应用
+        Toast.warning('未找到该应用，请刷新后重试');
+        return;
+      }
+      setSettingsApp(target);
+    },
+    [apps],
+  );
+
   const openInstalledDetail = (name: string) => {
     blurActive();
     setDetailFrom(view);
@@ -599,7 +613,6 @@ export default function App() {
             onAction={runAction}
             onOpenDetail={openInstalledDetail}
             onOpenApp={onOpenApp}
-            onOpenSettings={setSettingsApp}
           />
         ))}
       </div>
@@ -961,6 +974,7 @@ export default function App() {
               onAction={runAction}
               onInstall={(id) => doStoreInstall({ id, name: '' })}
               onOpenApp={onOpenApp}
+              onOpenSettings={openSettingsByName}
             />
           ) : null}
 
@@ -1041,6 +1055,8 @@ export default function App() {
 
       <AppSettingsModal
         app={settingsApp}
+        publicHost={meta?.publicHost}
+        publicScheme={meta?.publicScheme}
         onClose={() => setSettingsApp(null)}
         onSaved={() => {
           // 接入方式变化会影响「打开」地址，刷新已安装列表
