@@ -165,6 +165,59 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.82 修复跨文件系统安装丢失 manifest（应用装了但不显示）
+
+#### 现象
+
+其他 Linux 机器上安装 `fnos-quark`：日志显示安装成功、进程已启动，
+`data/apps/fnos-quark/` 里有 `target/ var/ logs/ etc/` 等目录，
+**但没有 `manifest`**，于是 `List()` 认为这不是有效应用，界面不显示。
+
+#### 根因：跨文件系统 rename 失败且错误被丢弃
+
+安装时要把包里的 `manifest / cmd / config / wizard / ICON.*`
+从临时解压目录搬到应用目录：
+
+```go
+os.Rename(src, dst)     // ← 返回值被直接丢弃
+```
+
+`/tmp`（临时目录）与应用数据目录（如 `/home/...`、`/dev/shm`）常在
+**不同文件系统**，此时 `rename(2)` 返回 `EXDEV` 失败。实测：
+
+```
+/tmp → /dev/shm 重命名失败: errno=18 (EXDEV)
+```
+
+于是这些文件一个都没搬过去，而失败被静默忽略。
+
+> 注意 `target/` 内容不受影响 —— 它走的是 `moveDirContents`，
+> 那里本来就有 rename 失败后回退复制的分支。只有根文件这段漏了。
+
+#### 修法
+
+1. `os.Rename` 失败时回退到 `moveAcrossFS`（复制 + 删除，
+   支持目录/文件/符号链接，保留权限与执行位）
+2. 失败时**返回明确错误**，不再静默继续
+3. 安装末尾**自检 `manifest`** 是否就位，缺失立刻报
+   `安装失败：manifest 未就位`，而不是等用户打开界面才发现应用不见
+
+#### 实测
+
+用 tmpfs 与 ext4 构造真正的跨设备场景（`TMPDIR=/tmp` 为 ext4，
+`data` 在 `/dev/shm` 为 tmpfs）：
+
+```
+manifest 就位 ✅
+应用列表: total: 1, running=True
+安装后目录: @appshare ICON.PNG ICON_256.PNG app.pid cmd config
+            etc home logs manifest shares target tmp var wizard
+```
+
+修复前该场景下 `manifest` 缺失、应用不可见。
+
+新增 4 项测试：目录搬运、执行位保留、符号链接保持、深层嵌套。
+
 ### 0.81 报告"无法识别"的应用，不再静默跳过
 
 #### 问题

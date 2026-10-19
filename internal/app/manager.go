@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -150,9 +151,25 @@ func (m *Manager) Install(fpkPath string, setArgs []string) error {
 	for _, name := range rootFiles {
 		src := filepath.Join(tmpDir, name)
 		dst := filepath.Join(appDir, name)
-		if _, err := os.Stat(src); err == nil {
-			os.Rename(src, dst)
+		if _, err := os.Stat(src); err != nil {
+			continue
 		}
+		// 关键：不能只用 os.Rename。
+		//
+		// 临时目录（/tmp）与应用目录常在不同文件系统，跨设备 rename 会抛
+		// EXDEV。早期这里直接丢弃了返回值，于是 manifest 没搬过来也毫无提示，
+		// 表现为「应用装成功、进程也在跑，但列表里看不到」—— 因为
+		// List() 依赖 manifest 判断应用是否有效。
+		if err := os.Rename(src, dst); err != nil {
+			if mvErr := moveAcrossFS(src, dst); mvErr != nil {
+				return fmt.Errorf("安装失败：无法写入 %s: %v（尝试回退复制后仍失败: %v）", dst, err, mvErr)
+			}
+		}
+	}
+	// 自检：manifest 是应用可见性的判据，缺失必须立刻报错，
+	// 而不是留到用户打开界面时才发现"应用不见了"。
+	if _, err := os.Stat(m.cfg.AppManifestFile(appname)); err != nil {
+		return fmt.Errorf("安装失败：manifest 未就位（%s）: %w", m.cfg.AppManifestFile(appname), err)
 	}
 
 	// 6.1 重映射脚本中的硬编码路径
@@ -2218,4 +2235,68 @@ func (m *Manager) startGatewayDaemon() error {
 	}()
 
 	return nil
+}
+
+// moveAcrossFS 在 os.Rename 失败时（典型是跨文件系统 EXDEV）用复制+删除完成搬运。
+//
+// 目录与文件都支持；符号链接保持为链接。权限位对齐，避免复制出来的
+// 可执行文件丢掉 x 位（历史上踩过 permission denied 的坑）。
+func moveAcrossFS(src, dst string) error {
+	info, err := os.Lstat(src)
+	if err != nil {
+		return err
+	}
+
+	switch {
+	case info.Mode()&os.ModeSymlink != 0:
+		target, err := os.Readlink(src)
+		if err != nil {
+			return err
+		}
+		if err := os.Symlink(target, dst); err != nil {
+			return err
+		}
+		return os.Remove(src)
+
+	case info.IsDir():
+		if err := os.MkdirAll(dst, info.Mode().Perm()|0o700); err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(src)
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if err := moveAcrossFS(filepath.Join(src, e.Name()), filepath.Join(dst, e.Name())); err != nil {
+				return err
+			}
+		}
+		return os.Remove(src)
+
+	default:
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		in, err := os.Open(src)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+
+		out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(out, in); err != nil {
+			out.Close()
+			return err
+		}
+		if err := out.Close(); err != nil {
+			return err
+		}
+		if err := os.Chmod(dst, info.Mode().Perm()); err != nil {
+			return err
+		}
+		return os.Remove(src)
+	}
 }
