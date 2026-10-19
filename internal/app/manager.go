@@ -1356,21 +1356,49 @@ func (m *Manager) Status(appname string) (*AppStatus, error) {
 }
 
 // List 列出所有已安装应用
+// SkippedApp 描述一个"目录存在但无法识别"的应用。
+//
+// 为什么需要它：List() 遇到 manifest 缺失/损坏会跳过该目录。
+// 早期版本完全静默 —— 用户看到"装成功了但不显示"，却没有任何线索。
+// 现在把原因回传，由界面展示，便于排查（缺 manifest、权限不足等）。
+type SkippedApp struct {
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
+}
+
 func (m *Manager) List() ([]AppInfo, error) {
+	apps, _, err := m.ListWithSkipped()
+	return apps, err
+}
+
+// ListWithSkipped 与 List 相同，但额外返回被跳过的应用及原因。
+func (m *Manager) ListWithSkipped() ([]AppInfo, []SkippedApp, error) {
 	entries, err := os.ReadDir(m.cfg.AppsDir)
 	if err != nil {
-		return nil, err
+		// AppsDir 不存在时视为"还没有安装任何应用"，而不是错误。
+		// 这样首次启动、或数据目录刚迁移完的过渡状态都不会让界面报错。
+		if os.IsNotExist(err) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
 	}
 
 	var apps []AppInfo
+	var skipped []SkippedApp
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
 		name := entry.Name()
 		manifestPath := m.cfg.AppManifestFile(name)
-		manifest, err := fpk.ParseManifest(manifestPath)
-		if err != nil {
+		manifest, perr := fpk.ParseManifest(manifestPath)
+		if perr != nil {
+			reason := "manifest 解析失败: " + perr.Error()
+			if os.IsNotExist(perr) || strings.Contains(perr.Error(), "no such file") {
+				reason = "缺少 manifest 文件（安装可能未完成）"
+			}
+			logger.Warn("跳过应用 %s: %s", name, reason)
+			skipped = append(skipped, SkippedApp{Name: name, Reason: reason})
 			continue
 		}
 
@@ -1393,7 +1421,7 @@ func (m *Manager) List() ([]AppInfo, error) {
 		apps = append(apps, info)
 	}
 
-	return apps, nil
+	return apps, skipped, nil
 }
 
 // applyWizardDefaults 把向导字段的默认值写入环境变量。

@@ -52,6 +52,8 @@ export interface AppsResponse {
   apps: AppView[];
   total: number;
   packagesDir: string;
+  /** 目录存在但无法识别的应用（缺 manifest、权限不足等） */
+  skipped?: { name: string; reason: string }[];
 }
 
 export interface PackageInfo {

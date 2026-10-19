@@ -165,6 +165,72 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.81 报告"无法识别"的应用，不再静默跳过
+
+#### 问题
+
+用户反馈：别的 Linux 机器上安装应用成功、进程也起来了、`data/apps` 里
+能看到文件，但**页面不显示已安装应用**，而且没有任何提示可查。
+
+根因在 `List()`：
+
+```go
+manifest, err := fpk.ParseManifest(manifestPath)
+if err != nil {
+    continue          // ← 静默跳过
+}
+```
+
+目录存在但 `manifest` 缺失/损坏时，应用被无声丢弃。
+用户既看不到应用，也不知道为什么 —— 排查完全无从下手。
+
+#### 修法
+
+新增 `ListWithSkipped()`，同时返回可用应用与**被跳过的应用及原因**：
+
+```go
+func (m *Manager) ListWithSkipped() ([]AppInfo, []SkippedApp, error)
+```
+
+`List()` 保持原签名（内部转调），既有调用方零改动。
+
+顺带修掉一个边界：`AppsDir` 不存在时**不再报错**，按"还没有安装应用"处理。
+首次启动、或刚迁移完数据目录的过渡状态都不会让界面报 500。
+
+#### 界面提示
+
+`/api/apps` 增加 `skipped` 字段：
+
+```json
+{"total":1,
+ "skipped":[{"name":"broken-app","reason":"缺少 manifest 文件（安装可能未完成）"}]}
+```
+
+「已安装」页显示黄色提示条：
+
+```
+有 1 个应用目录无法识别，未显示在列表中：
+  broken-app — 缺少 manifest 文件（安装可能未完成）
+通常是安装未完成或数据目录不完整。可尝试重新安装，
+或检查 <数据目录>/apps 下对应目录是否含 manifest 文件。
+```
+
+日志里也会 warn 一次，便于对照服务端日志排查。
+
+#### 实测
+
+目标目录放入一个无 manifest 的 `broken-app` 后：
+
+```
+total: 1
+skipped: [{"name":"broken-app","reason":"缺少 manifest 文件（安装可能未完成）"}]
+```
+
+界面确实渲染出提示条，内容包含应用名与原因。
+
+新增 4 项测试：正常应用不被误报、缺 manifest 会被报告、
+AppsDir 不存在不报错、`List()` 旧行为不变。
+
 ### 0.80 数据目录改为「可执行文件旁的 data/」
 
 #### 旧方案的问题

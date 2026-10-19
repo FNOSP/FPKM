@@ -54,7 +54,7 @@ func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	infos, err := s.mgr.List()
+	infos, skipped, err := s.mgr.ListWithSkipped()
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "读取应用列表失败: "+err.Error())
 		return
@@ -125,6 +125,9 @@ func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
 		"apps":        views,
 		"total":       len(views),
 		"packagesDir": s.cfg.AppsDir,
+		// skipped：目录存在但无法识别的应用（缺 manifest / 权限不足等）。
+		// 界面据此提示用户，避免"装好了却不显示"无从排查。
+		"skipped": skipped,
 	})
 }
 

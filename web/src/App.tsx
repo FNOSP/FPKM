@@ -81,6 +81,8 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [needsSetup, setNeedsSetup] = useState(false);
   const [needLogin, setNeedLogin] = useState(false);
+  /** 目录存在但无法识别的应用（缺 manifest 等），用于提示用户 */
+  const [skippedApps, setSkippedApps] = useState<{ name: string; reason: string }[]>([]);
   /** 「应用设置」弹窗的当前应用；null 表示关闭 */
   const [settingsApp, setSettingsApp] = useState<AppView | null>(null);
 
@@ -168,6 +170,7 @@ export default function App() {
     setError('');
     try {
       const res = await listApps();
+      setSkippedApps(res.skipped ?? []);
       setApps(res.apps ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -990,6 +993,30 @@ export default function App() {
                   description={error}
                   closeIcon={null}
                   style={{ marginBottom: 16 }}
+                />
+              ) : null}
+              {skippedApps.length > 0 ? (
+                <Banner
+                  type="warning"
+                  closeIcon={null}
+                  style={{ marginBottom: 16 }}
+                  description={
+                    <div>
+                      <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                        有 {skippedApps.length} 个应用目录无法识别，未显示在列表中：
+                      </div>
+                      {skippedApps.map((s) => (
+                        <div key={s.name} style={{ fontSize: 12 }}>
+                          <code>{s.name}</code> — {s.reason}
+                        </div>
+                      ))}
+                      <div style={{ marginTop: 6, fontSize: 12 }}>
+                        通常是安装未完成或数据目录不完整。可尝试重新安装，或检查{' '}
+                        <code>{meta?.appsDir || '数据目录/apps'}</code> 下对应目录是否含{' '}
+                        <code>manifest</code> 文件。
+                      </div>
+                    </div>
+                  }
                 />
               ) : null}
               {renderInstalled(onOpenApp)}
