@@ -17,7 +17,7 @@
 <p align="center">
   <b>让 <code>.fpk</code> 离线安装包跑在任何 Linux 上 —— 不需要 fnOS</b>
 </p>
-
+---
 FPKM（FeiNiu PacKage Manager）是一个用 Go 编写的 `.fpk` 应用包管理器。
 它复刻了 fnOS 的应用安装与运行环境，使飞牛生态里的应用包可以在普通
 Linux 发行版、容器、甚至开发机上直接安装和运行。
