@@ -162,6 +162,19 @@ Windows / macOS / Linux 均可运行（`fpkm.exe`、`fpkm` 同名命令）。
 
 ---
 
+## Docker 部署
+
+```bash
+docker run -d --name fpkm -p 7666:7666 \
+  -v /path/to/fpkm-data:/app/data \
+  --restart unless-stopped \
+  qilinzhu/fpkm:latest
+```
+
+支持 `linux/amd64` 与 `linux/arm64`。数据目录必须挂载，否则重建容器会丢失已安装应用。
+
+详见 [Docker 部署文档](docs/DOCKER.md)。
+
 ## 快速开始
 
 ### 从源码构建

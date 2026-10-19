@@ -165,6 +165,20 @@ resizable, with the taskbar always on top:
 
 <img src="docs/screenshots/login.webp" alt="Login" width="760">
 
+## Docker
+
+```bash
+docker run -d --name fpkm -p 7666:7666 \
+  -v /path/to/fpkm-data:/app/data \
+  --restart unless-stopped \
+  qilinzhu/fpkm:latest
+```
+
+Supports `linux/amd64` and `linux/arm64`. The data volume must be mounted,
+otherwise rebuilding the container loses installed applications.
+
+See [Docker deployment](docs/DOCKER.md) for details.
+
 ## Quick start
 
 ### Build from source

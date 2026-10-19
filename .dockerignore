@@ -1,0 +1,15 @@
+# 只把发布二进制和必要文件带进构建上下文，避免把 265MB 的
+# node_modules、.git 历史、截图等一起发送给 daemon
+.git
+.github
+web/node_modules
+web/src
+docs
+internal
+cmd
+*.md
+nohup.out
+dist/fpkm
+dist/fpkm-windows-*
+dist/fpkm-darwin-*
+dist/data
