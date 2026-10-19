@@ -1,0 +1,19 @@
+# 统一换行符，避免跨平台协作时脚本出现 CRLF 导致 bash 报错
+* text=auto eol=lf
+
+# 二进制文件不做换行转换
+*.png binary
+*.jpg binary
+*.webp binary
+*.ico binary
+*.fpk binary
+
+# 前端构建产物与二进制不参与 diff 统计
+dist/** linguist-generated=true -diff
+internal/web/dist/** linguist-generated=true -diff
+
+# 标记语言
+*.go linguist-detectable=true
+*.tsx linguist-detectable=true
+*.ts linguist-detectable=true
+*.css linguist-detectable=true

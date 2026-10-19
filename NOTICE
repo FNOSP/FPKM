@@ -1,0 +1,14 @@
+FPKM · 飞牛应用包管理器
+Copyright 2026 FPKM contributors
+
+This product is licensed under the Apache License, Version 2.0.
+See the LICENSE file for the full license text.
+
+--------------------------------------------------------------------------------
+
+本项目在实现上参考了飞牛 fnOS 的应用包格式（.fpk）与运行时约定，
+包括 manifest 字段、TRACE/TRIM 环境变量命名、统一网关的访问模型等。
+这些格式与约定由广州铁刃智造技术有限公司（飞牛 fnOS）定义，
+本项目仅做兼容性实现，与飞牛官方无隶属关系。
+
+"飞牛"、"fnOS" 等名称与标识归其各自权利人所有。

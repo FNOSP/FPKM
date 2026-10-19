@@ -213,4 +213,6 @@ FPKM 只是把这套约定在飞牛之外重新实现了一遍。
 
 ## License
 
-（待补充）
+[Apache License 2.0](LICENSE) © 2026 FPKM contributors
+
+可自由使用、修改、分发（含商业用途），需保留版权与许可声明。
