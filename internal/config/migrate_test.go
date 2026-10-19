@@ -114,3 +114,91 @@ func TestLegacyBaseDirShape(t *testing.T) {
 		t.Errorf("旧目录应以 fpk 结尾，得到 %s", got)
 	}
 }
+
+// 关键回归：目标目录已存在（空壳）时，仍要把旧目录里的应用合并进来。
+//
+// 真实故障：data/apps 被初始化成空目录后，迁移把整个 apps 目录跳过，
+// 用户迁移完看到"0 个已安装应用"。
+func TestMergeTreeIntoExistingDir(t *testing.T) {
+	legacy := t.TempDir()
+	modern := t.TempDir()
+
+	// 旧目录：apps/Lucky/{manifest,target}
+	appDir := filepath.Join(legacy, "apps", "Lucky")
+	if err := os.MkdirAll(filepath.Join(appDir, "target"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "manifest"), []byte("appname=Lucky"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 新目录：apps 只是个空目录（初始化时建的骨架）
+	if err := os.MkdirAll(filepath.Join(modern, "apps"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	moved, skipped, failed := mergeTree(modern, filepath.Join(legacy, "apps"), filepath.Join(modern, "apps"))
+	if len(failed) != 0 {
+		t.Fatalf("不应有失败项: %v", failed)
+	}
+	if len(moved) == 0 {
+		t.Error("应迁移出条目")
+	}
+
+	// 应用必须已经在新位置
+	mp := filepath.Join(modern, "apps", "Lucky", "manifest")
+	data, err := os.ReadFile(mp)
+	if err != nil {
+		t.Fatalf("应用未被迁移: %v", err)
+	}
+	if string(data) != "appname=Lucky" {
+		t.Errorf("内容不匹配: %q", data)
+	}
+	if len(skipped) != 0 {
+		t.Errorf("空壳目录不应产生跳过项: %v", skipped)
+	}
+}
+
+// 同名文件冲突时跳过，不覆盖新数据
+func TestMergeTreeSkipsConflictingFiles(t *testing.T) {
+	legacy := t.TempDir()
+	modern := t.TempDir()
+
+	os.WriteFile(filepath.Join(legacy, "password.json"), []byte("OLD"), 0o600)
+	os.MkdirAll(modern, 0o755)
+	os.WriteFile(filepath.Join(modern, "password.json"), []byte("NEW"), 0o600)
+
+	moved, skipped, failed := mergeTree(modern, legacy, modern)
+	if len(failed) != 0 {
+		t.Fatalf("不应有失败项: %v", failed)
+	}
+	if len(skipped) != 1 {
+		t.Errorf("应有 1 个跳过项，得到 %v", skipped)
+	}
+	data, _ := os.ReadFile(filepath.Join(modern, "password.json"))
+	if string(data) != "NEW" {
+		t.Errorf("不应覆盖已有文件，实际 %q", data)
+	}
+	_ = moved
+}
+
+// 深层嵌套目录也应递归合并
+func TestMergeTreeDeepNesting(t *testing.T) {
+	legacy := t.TempDir()
+	modern := t.TempDir()
+
+	deep := filepath.Join(legacy, "apps", "A", "var", "data")
+	os.MkdirAll(deep, 0o755)
+	os.WriteFile(filepath.Join(deep, "config.json"), []byte("{}"), 0o644)
+
+	// 目标只建到 apps/A
+	os.MkdirAll(filepath.Join(modern, "apps", "A"), 0o755)
+
+	_, _, failed := mergeTree(modern, filepath.Join(legacy, "apps"), filepath.Join(modern, "apps"))
+	if len(failed) != 0 {
+		t.Fatalf("不应有失败项: %v", failed)
+	}
+	if _, err := os.Stat(filepath.Join(modern, "apps", "A", "var", "data", "config.json")); err != nil {
+		t.Errorf("深层文件未被迁移: %v", err)
+	}
+}

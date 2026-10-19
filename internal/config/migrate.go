@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"fpkm/internal/logger"
 )
@@ -57,7 +58,27 @@ func MigrateFromLegacy() (*MigrateResult, error) {
 		src := filepath.Join(from, e.Name())
 		dst := filepath.Join(to, e.Name())
 
-		// 目标已存在则跳过（不覆盖既有数据）
+		// 目录要递归合并，不能"目标存在就整体跳过"。
+		//
+		// 曾经的 bug：目标 data/apps 已存在（空目录，可能只是初始化时
+		// 建的骨架），旧目录里的应用就被整体跳过，用户迁移后看到
+		// "0 个已安装应用"。目录必须进入内部逐项判断，只有**文件**
+		// 冲突才跳过。
+		if e.IsDir() {
+			merged, skipped, failed := mergeTree(to, src, dst)
+			if len(merged) > 0 {
+				res.Moved = append(res.Moved, merged...)
+			}
+			if len(skipped) > 0 {
+				res.Skipped = append(res.Skipped, skipped...)
+			}
+			if len(failed) > 0 {
+				res.Failed = append(res.Failed, failed...)
+			}
+			continue
+		}
+
+		// 文件：目标已存在则跳过（不覆盖既有数据）
 		if _, err := os.Stat(dst); err == nil {
 			res.Skipped = append(res.Skipped, e.Name())
 			continue
@@ -139,4 +160,52 @@ func copyTree(src, dst string) error {
 		// 复制后显式对齐权限：os.OpenFile 的 perm 只对新建文件生效
 		return os.Chmod(dst, info.Mode().Perm())
 	}
+}
+
+// mergeTree 把 src 目录的内容合并进 dst，返回已迁移/跳过/失败的条目。
+//
+// 与 copyTree 的区别：dst 可以已存在，按**逐项**方式合并 ——
+// 目录继续递归，同名文件才跳过。这样"目标目录先被初始化成空壳"
+// 也不会挡住真实的旧数据。
+func mergeTree(base, src, dst string) (moved, skipped, failed []string) {
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return nil, nil, []string{fmt.Sprintf("%s: 创建目录失败: %v", dst, err)}
+	}
+
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return nil, nil, []string{fmt.Sprintf("%s: 读取失败: %v", src, err)}
+	}
+
+	for _, e := range entries {
+		s := filepath.Join(src, e.Name())
+		d := filepath.Join(dst, e.Name())
+
+		if e.IsDir() {
+			m, sk, f := mergeTree(base, s, d)
+			moved = append(moved, m...)
+			skipped = append(skipped, sk...)
+			failed = append(failed, f...)
+			continue
+		}
+
+		if _, err := os.Stat(d); err == nil {
+			skipped = append(skipped, relToBase(base, d))
+			continue
+		}
+		if err := copyTree(s, d); err != nil {
+			failed = append(failed, fmt.Sprintf("%s: %v", relToBase(base, d), err))
+			continue
+		}
+		moved = append(moved, relToBase(base, d))
+	}
+	return moved, skipped, failed
+}
+
+// relToBase 返回相对数据根目录的路径，让迁移输出更易读。
+func relToBase(base, p string) string {
+	if rel, err := filepath.Rel(base, p); err == nil && !strings.HasPrefix(rel, "..") {
+		return rel
+	}
+	return p
 }
