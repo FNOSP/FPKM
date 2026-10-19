@@ -30,7 +30,6 @@ Linux 发行版、容器、甚至开发机上直接安装和运行。
 
 ![FPKM 桌面](docs/screenshots/desktop.webp)
 
----
 
 ## 为什么需要 FPKM
 
