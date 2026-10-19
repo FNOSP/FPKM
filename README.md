@@ -1,5 +1,7 @@
 # FPKM · 飞牛应用包管理器
 
+**中文** · [English](README.en.md)
+
 <p align="center">
   <img src="docs/banner.png" alt="FPKM × FNOSP" width="760">
 </p>
