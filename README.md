@@ -10,6 +10,8 @@ Linux 发行版、容器、甚至开发机上直接安装和运行。
 你的 Arch / Ubuntu / Debian / CentOS  … 装的是 .fpk 应用包
 ```
 
+![FPKM 桌面](docs/screenshots/desktop.webp)
+
 ---
 
 ## 为什么需要 FPKM
@@ -119,13 +121,25 @@ Windows / macOS / Linux 均可运行（`fpkm.exe`、`fpkm` 同名命令）。
 ./fpkm web --bind 0.0.0.0 --port 7666
 ```
 
-打开浏览器即可获得一个带壁纸、可拖动子窗口、macOS 风格任务栏的桌面环境，
-内置应用商店与已安装应用管理：
+打开浏览器即可获得一个完整的桌面环境，内置应用商店与已安装应用管理：
 
 - 浏览远程应用源、一键安装
 - 从本地文件或上传 `.fpk` 安装
 - 应用以子窗口（`iframe`）或新标签页打开，按应用自身配置决定
 - 每个应用可单独设置接入方式：**端口直连 / 统一网关 / CGI**
+
+**应用商店** —— 浏览应用源、一键安装，已安装应用可直接打开：
+
+![应用商店](docs/screenshots/store.webp)
+
+**多窗口并行** —— 多个应用可同时以子窗口打开，自由拖动与缩放，
+任务栏始终在最顶层：
+
+![多窗口与任务栏](docs/screenshots/windows.webp)
+
+**登录保护** —— 首次访问设置管理密码，之后凭密码登录：
+
+<img src="docs/screenshots/login.webp" alt="登录页" width="760">
 
 ---
 
