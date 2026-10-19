@@ -17,6 +17,11 @@ cd "$ROOT"
 
 TARGET="${1:-native}"
 OUT_DIR="${OUT_DIR:-$ROOT/dist}"
+
+# 版本号：优先用环境变量 VERSION，其次取 git tag，最后回退 dev
+VERSION="${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}"
+BUILD_TIME="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
 mkdir -p "$OUT_DIR"
 
 echo "==> [1/3] 构建前端 (web/)"
@@ -30,7 +35,8 @@ if [ ! -f internal/web/dist/index.html ]; then
 fi
 
 echo "==> [3/3] 编译 Go 二进制 ($TARGET)"
-LDFLAGS="-s -w"
+LDFLAGS="-s -w -X 'fpkm/cmd.version=${VERSION}' -X 'fpkm/cmd.buildTime=${BUILD_TIME}'"
+echo "==> 版本: ${VERSION}"
 case "$TARGET" in
   native)
     go build -trimpath -ldflags "$LDFLAGS" -o "$OUT_DIR/fpkm" .
@@ -49,6 +55,11 @@ case "$TARGET" in
     ;;
   darwin-arm)
     CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$LDFLAGS" -o "$OUT_DIR/fpkm-darwin-arm64" .
+    ;;
+  release)
+    # 发布用：Linux amd64 + arm64（fnOS/NAS 场景最常见）
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$LDFLAGS" -o "$OUT_DIR/fpkm-linux-amd64" .
+    CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$LDFLAGS" -o "$OUT_DIR/fpkm-linux-arm64" .
     ;;
   *)
     echo "未知目标: $TARGET" >&2
