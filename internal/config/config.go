@@ -28,17 +28,7 @@ func GetConfig() *Config {
 }
 
 func (c *Config) init() {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "."
-	}
-
-	// 跨平台根目录选择
-	if runtime.GOOS == "windows" {
-		c.BaseDir = filepath.Join(home, ".fpk")
-	} else {
-		c.BaseDir = filepath.Join(home, ".local", "fpk")
-	}
+	c.BaseDir = resolveBaseDir()
 
 	c.AppsDir = filepath.Join(c.BaseDir, "apps")
 	c.BinDir = filepath.Join(c.BaseDir, "bin")
@@ -144,4 +134,68 @@ func (c *Config) WebPortFile() string {
 // socket 文件放在 target/ 目录下（与飞牛一致）
 func (c *Config) AppSocketPath(appname, socketName string) string {
 	return filepath.Join(c.AppTargetDir(appname), socketName)
+}
+
+// resolveBaseDir 决定数据根目录。
+//
+// 优先使用「可执行文件所在目录/data」：
+//
+//	/opt/fpkm/dist/fpkm  →  /opt/fpkm/dist/data
+//
+// 为什么改到这里：
+//
+//	旧方案用 $HOME/.local/fpk。数据跟着「运行时的 HOME」走，
+//	而 HOME 会随用户改变（sudo、systemd、docker、不同的登录用户），
+//	于是出现"某个用户装的应用，换个身份启动就全部消失"的问题。
+//	数据放在程序旁边后，同一份二进制必然对应同一份数据，不会再错位。
+//
+// 回退：可执行文件所在目录不可写时（例如 /usr/local/bin 只读），
+// 退回 $HOME/.local/fpk，保证程序仍能启动。
+func resolveBaseDir() string {
+	if exe, err := os.Executable(); err == nil {
+		// 解析符号链接，避免通过软链接启动时把 data 建到软链接所在目录
+		if resolved, rerr := filepath.EvalSymlinks(exe); rerr == nil {
+			exe = resolved
+		}
+		candidate := filepath.Join(filepath.Dir(exe), "data")
+		if dirUsable(candidate) {
+			return candidate
+		}
+	}
+	return legacyBaseDir()
+}
+
+// legacyBaseDir 是旧版本的存储位置（$HOME/.local/fpk 或 %USERPROFILE%\.fpk）。
+func legacyBaseDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	if runtime.GOOS == "windows" {
+		return filepath.Join(home, ".fpk")
+	}
+	return filepath.Join(home, ".local", "fpk")
+}
+
+// dirUsable 判断目录能否创建并写入。
+//
+// 只检查"存在"是不够的：目录可能存在但只读。这里实际尝试创建目录，
+// 并在目录已存在时验证可写，避免把 data 放在只读位置后运行时报错。
+func dirUsable(dir string) bool {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return false
+	}
+	probe := filepath.Join(dir, ".write-test")
+	f, err := os.OpenFile(probe, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return false
+	}
+	f.Close()
+	os.Remove(probe)
+	return true
+}
+
+// LegacyBaseDirForDisplay 返回旧版本的数据目录，供 CLI 展示。
+func LegacyBaseDirForDisplay() string {
+	return legacyBaseDir()
 }

@@ -165,6 +165,85 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.80 数据目录改为「可执行文件旁的 data/」
+
+#### 旧方案的问题
+
+数据根目录原本是 `$HOME/.local/fpk`（Windows `%USERPROFILE%\.fpk`），
+由 `os.UserHomeDir()` 决定。**数据跟着"运行时的 HOME"走**，于是：
+
+```
+HOME=/data/user   → BaseDir=/data/user/.local/fpk  → 看得到应用
+HOME=/root        → BaseDir=/root/.local/fpk       → 看不到（另一份数据）
+sudo 启动          → HOME 变成 /root               → 应用全部"消失"
+```
+
+这就是"应用装好了、商店和桌面却不显示"的根因 —— 并非数据丢失，
+而是**换了身份去看另一份空目录**。systemd / docker / 不同登录用户
+都会触发。
+
+#### 新方案
+
+```
+$BASE = 可执行文件所在目录/data
+  例：/opt/fpkm/dist/fpkm → /opt/fpkm/dist/data
+```
+
+同一份二进制必然对应同一份数据，与运行身份无关。
+
+解析时用 `filepath.EvalSymlinks` 去掉软链接，避免通过软链接启动时
+把 data 建到软链接所在目录。
+
+**回退**：若程序目录不可写（如装在 `/usr/local/bin`），自动退回
+`$HOME/.local/fpk`，保证程序仍能启动。判断方式是实际创建目录并
+写入探测文件（`dirUsable`），而不是只看目录是否存在。
+
+#### 迁移旧数据
+
+新增命令（建议先停服务）：
+
+```bash
+sudo ./dist/fpkm migrate-data
+```
+
+输出：
+
+```
+旧数据目录: /root/.local/fpk
+新数据目录: /vol2/1000/sh/fpkm/dist/data
+
+已迁移 2 项:
+  ✓ icons
+  ✓ password.json
+跳过 3 项（目标已存在，未覆盖）:
+  - apps
+```
+
+设计取舍：
+
+- **不覆盖**：目标已存在则跳过，绝不冲掉新数据
+- **不删源**：迁移后保留旧目录，确认无误由用户自行清理
+- 用**复制**而非 rename：新旧目录可能跨文件系统
+- 逐项搬运，单个失败不影响其它，最后汇总
+
+注意要用**运行 fpkm 的那个身份**执行，否则搬到的是另一份 HOME 的数据。
+
+#### 实测
+
+用两个完全不同的 HOME 启动同一份二进制：
+
+```
+HOME=/tmp/hA 安装 Lucky → /tmp/newdir/data/apps/Lucky
+HOME=/tmp/hB 重启       → 已安装: 1，Lucky 可见  ✅
+```
+
+修复前该场景会显示 0 个应用。
+
+只读目录回退也已验证：程序目录 555 时自动用 `$HOME/.local/fpk`。
+
+新增 6 项测试（内容与权限保留、目录可进入、符号链接保持、
+不覆盖目标、dirUsable 行为、旧路径形态）。
+
 ### 0.79 应用设置：手动切换接入方式（端口 / 网关 / CGI）
 
 #### 背景
