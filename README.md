@@ -1,6 +1,22 @@
 # FPKM · 飞牛应用包管理器
 
-**让 `.fpk` 离线安装包跑在任何 Linux 上 —— 不需要 fnOS。**
+<p align="center">
+  <img src="docs/banner.png" alt="FPKM × FNOSP" width="760">
+</p>
+
+<p align="center">
+  <a href="https://github.com/FNOSP/FPKM/stargazers"><img src="https://img.shields.io/github/stars/FNOSP/FPKM?style=flat-square&logo=github&label=Stars&color=2b6cff" alt="Stars"></a>
+  <a href="https://github.com/FNOSP/FPKM/network/members"><img src="https://img.shields.io/github/forks/FNOSP/FPKM?style=flat-square&logo=github&label=Forks&color=2b6cff" alt="Forks"></a>
+  <a href="https://github.com/FNOSP/FPKM/issues"><img src="https://img.shields.io/github/issues/FNOSP/FPKM?style=flat-square&logo=github&label=Issues&color=e3b341" alt="Issues"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/FNOSP/FPKM?style=flat-square&label=License&color=e05d44" alt="License"></a>
+  <img src="https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
+  <img src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React">
+  <img src="https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20%7C%20macOS-2b6cff?style=flat-square&logo=linux&logoColor=white" alt="Platform">
+</p>
+
+<p align="center">
+  <b>让 <code>.fpk</code> 离线安装包跑在任何 Linux 上 —— 不需要 fnOS</b>
+</p>
 
 FPKM（FeiNiu PacKage Manager）是一个用 Go 编写的 `.fpk` 应用包管理器。
 它复刻了 fnOS 的应用安装与运行环境，使飞牛生态里的应用包可以在普通
