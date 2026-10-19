@@ -1,6 +1,8 @@
 # 依赖与构建产物
 node_modules/
 dist/
+# 运行时数据目录（位于可执行文件旁，含密码与已安装应用）
+data/
 internal/web/dist/assets/
 web/public/icon-*.png
 web/public/apple-touch-icon.png
