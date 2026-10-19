@@ -413,3 +413,30 @@ export interface SystemStats {
 export function getSystemStats(): Promise<SystemStats> {
   return request('/api/system/stats');
 }
+
+/** 应用接入方式设置（应用设置弹窗） */
+export interface AccessSetting {
+  appName: string;
+  /** '' = 跟随 ui/config；port / gateway / cgi = 用户手动指定 */
+  mode: '' | 'port' | 'gateway' | 'cgi';
+  port?: number;
+  path?: string;
+}
+
+/** 读取某个应用的接入方式设置 */
+export function getAccessSetting(app: string): Promise<AccessSetting> {
+  return request(`/api/access?app=${encodeURIComponent(app)}`);
+}
+
+/** 保存某项的接入方式设置 */
+export function setAccessSetting(input: {
+  app: string;
+  mode: '' | 'port' | 'gateway' | 'cgi';
+  port?: number | string;
+  path?: string;
+}): Promise<AccessSetting> {
+  return request('/api/access/set', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}

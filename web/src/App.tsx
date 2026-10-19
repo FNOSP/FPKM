@@ -54,6 +54,7 @@ import {
 } from './api/client';
 
 import AppCard from './components/AppCard';
+import AppSettingsModal from './components/AppSettingsModal';
 import Auth from './components/Auth';
 import StoreCard from './components/StoreCard';
 import FileBrowser from './components/FileBrowser';
@@ -80,6 +81,8 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [needsSetup, setNeedsSetup] = useState(false);
   const [needLogin, setNeedLogin] = useState(false);
+  /** 「应用设置」弹窗的当前应用；null 表示关闭 */
+  const [settingsApp, setSettingsApp] = useState<AppView | null>(null);
 
 
   // 顶层模式：desktop=FPKM 桌面（默认）；store=应用商店（全屏）
@@ -596,6 +599,7 @@ export default function App() {
             onAction={runAction}
             onOpenDetail={openInstalledDetail}
             onOpenApp={onOpenApp}
+            onOpenSettings={setSettingsApp}
           />
         ))}
       </div>
@@ -1033,6 +1037,15 @@ export default function App() {
         submitting={wizardSubmitting}
         onCancel={cancelWizard}
         onSubmit={submitWizard}
+      />
+
+      <AppSettingsModal
+        app={settingsApp}
+        onClose={() => setSettingsApp(null)}
+        onSaved={() => {
+          // 接入方式变化会影响「打开」地址，刷新已安装列表
+          void refreshInstalled();
+        }}
       />
 
       <TaskModal

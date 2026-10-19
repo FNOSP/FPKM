@@ -7,6 +7,7 @@ import {
   IconApps,
   IconRefresh,
   IconExternalOpen,
+  IconSetting,
 } from '@douyinfe/semi-icons';
 import type { AppView, AppAction } from '../api/types';
 import { buildAccessURL, kindLabel, stripHtml } from '../utils/format';
@@ -28,6 +29,8 @@ interface Props {
    * 全屏兜底模式不传，退化为新标签页。
    */
   onOpenApp?: (name: string) => void;
+  /** 打开「应用设置」（选择端口/网关/CGI 接入方式） */
+  onOpenSettings?: (app: AppView) => void;
 }
 
 const { Text } = Typography;
@@ -41,6 +44,7 @@ export default function AppCard({
   onAction,
   onOpenDetail,
   onOpenApp,
+  onOpenSettings,
 }: Props) {
   // 按当前页面的主机名拼地址，而不是写死 localhost
   const accessURL = buildAccessURL(app.access, publicHost, publicScheme);
@@ -150,6 +154,24 @@ export default function AppCard({
                 }}
               >
                 打开
+              </Button>
+            </Tooltip>
+          ) : null}
+
+          {onOpenSettings ? (
+            <Tooltip content="设置接入方式（端口 / 网关 / CGI）">
+              <Button
+                size="small"
+                theme="borderless"
+                type="tertiary"
+                className="fpkm-btn-neutral"
+                icon={<IconSetting />}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenSettings(app);
+                }}
+              >
+                应用设置
               </Button>
             </Tooltip>
           ) : null}

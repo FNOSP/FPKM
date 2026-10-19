@@ -288,6 +288,9 @@ type AccessInfo struct {
 	LaunchMode string `json:"launchMode,omitempty"`
 	// Title ui/config 里的入口名（可作为桌面图标名）
 	Title string `json:"title,omitempty"`
+	// Overridden 表示该接入方式由用户在「应用设置」里手动指定，
+	// 而非完全由 ui/config 推导
+	Overridden bool `json:"overridden,omitempty"`
 }
 
 // describeAccess 判断应用的接入方式与访问参数。
@@ -315,6 +318,67 @@ func describeAccessFor(cfg *config.Config, name, port string, env app.EnvMap, ap
 		launchMode = string(app.ResolveLaunchMode(targetDir, appDir))
 		if entry, ok := app.ReadUIConfigEntry(targetDir, appDir); ok {
 			entryTitle = strings.TrimSpace(entry.Title)
+		}
+	}
+
+	// 用户手动指定的接入方式优先于 ui/config。
+	//
+	// 场景：Lucky 这类「飞牛定制构建」硬编码了 fnOS 原生 socket 路径，
+	// 并按 fnOS 网关签名校验请求；经 fpkm 网关转发会被它判为非法。
+	// 用户在「应用设置」里改为端口应用后，fpkm 让浏览器直连应用端口，
+	// 绕开网关即可正常使用。
+	if ov := app.GetAccessOverride(cfg, name); ov.Mode != "" {
+		switch ov.Mode {
+		case app.AccessPort:
+			port := ov.Port
+			if port <= 0 {
+				// 未指定端口时沿用环境变量里的端口
+				if p, err := strconv.Atoi(port0(env)); err == nil {
+					port = p
+				}
+			}
+			if port > 0 {
+				path := ov.Path
+				if path == "" {
+					path = "/"
+				}
+				return AccessInfo{
+					Kind:       "port",
+					AccessPath: path,
+					AccessPort: port,
+					Scheme:     "http",
+					LaunchMode: launchMode,
+					Title:      entryTitle,
+					Overridden: true,
+				}
+			}
+		case app.AccessGateway, app.AccessCGI:
+			// 强制走网关：前缀优先用 env 里已纠正过的值
+			prefixVal := env["GATEWAY_PREFIX"]
+			if prefixVal == "" {
+				prefixVal = "/app/" + name
+			}
+			path := ov.Path
+			if path == "" {
+				path = env["LAUNCH_PATH"]
+			}
+			if path == "" {
+				path = app.EnsureTrailingSlash(prefixVal)
+			}
+			kindVal := "gateway"
+			if ov.Mode == app.AccessCGI {
+				kindVal = "cgi"
+			}
+			return AccessInfo{
+				Kind:       kindVal,
+				AccessPath: path,
+				Prefix:     prefixVal,
+				AccessPort: gatewayPort,
+				Scheme:     "http",
+				LaunchMode: launchMode,
+				Title:      entryTitle,
+				Overridden: true,
+			}
 		}
 	}
 
@@ -486,4 +550,14 @@ func (s *Server) validatePackagePath(p string) error {
 		return fmt.Errorf("仅支持 .fpk 文件")
 	}
 	return nil
+}
+
+// port0 返回环境变量中的端口字符串（兼容多个键名）。
+func port0(env app.EnvMap) string {
+	for _, k := range []string{"TRIM_SERVICE_PORT", "port", "UI_PORT"} {
+		if v := strings.TrimSpace(env[k]); v != "" {
+			return v
+		}
+	}
+	return ""
 }

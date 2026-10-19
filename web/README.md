@@ -165,6 +165,80 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.79 应用设置：手动切换接入方式（端口 / 网关 / CGI）
+
+#### 背景
+
+部分应用是「飞牛定制构建」，会无视 `ui/config` 的约定，硬绑 fnOS 私有机制：
+
+- `Lucky 3.0.2` 把 socket 路径写死在 `/vol2/@appcenter/Lucky/app.sock`
+- 它还校验 fnOS 官方网关的 `trim-cgi-sign` 签名（HMAC，未公开）
+
+这类应用经 fpkm 网关访问会被自身拒绝（`fnOS gateway identity invalid`），
+但**直接访问它的端口是完全正常的**。因此需要让用户能手动改接入方式。
+
+#### 新增：应用设置弹窗
+
+「已安装」列表的每个应用卡片多了一个 **应用设置** 按钮，弹窗可设置：
+
+| 访问方式 | 行为 |
+|---------|------|
+| 跟随应用配置 | 由应用自带 `ui/config` 决定（默认，行为不变） |
+| 端口应用 | 浏览器直连 `host:port`，不经网关 —— 用于上述定制构建 |
+| 统一网关 | 强制经 `/app/{name}` 转发 |
+| CGI 应用 | 经网关转发到 CGI 程序 |
+
+另有「访问端口」与「访问路径」两个字段，并实时预览**打开地址**。
+
+按需求约定：
+
+- 访问端口填 `16601`、访问路径填 `/` → 打开地址为 `http://<host>:16601/`
+- 访问路径填 `16601` 时按普通路径处理（会自动补前导斜杠），不会当成端口
+
+#### 实现
+
+**存储**：`$BaseDir/access-overrides.json`，按应用名记录
+`{mode, port, path}`，原子写。
+
+**优先级**：用户设置 > `ui/config` 推导。`describeAccessFor` 开头先看覆盖：
+
+```go
+if ov := app.GetAccessOverride(cfg, name); ov.Mode != "" {
+    switch ov.Mode {
+    case app.AccessPort:   // 直连端口，可自定义路径
+    case app.AccessGateway, app.AccessCGI:  // 强制走网关
+    }
+}
+```
+
+返回的 `AccessInfo` 增加 `overridden` 标志，前端可据此显示"已手动指定"。
+
+**API**：
+
+```
+GET  /api/access?app=Lucky          → {"mode":"","port":0,"path":""}
+POST /api/access/set                → {"app":"Lucky","mode":"port","port":16601,"path":"/"}
+```
+
+`mode` 为空（`auto`）表示清除覆盖，回到 `ui/config` 行为。
+端口接受数字或字符串（前端输入框传的是文本）。
+
+#### 实测
+
+设为端口应用 `16601 /` 后：
+
+```
+Lucky access: {"kind":"port","accessPath":"/","accessPort":16601,
+               "launchMode":"tab","overridden":true}
+```
+
+界面验证：卡片有「应用设置」按钮、弹窗四个选项齐全、
+表单字段为「访问方式 / 访问端口 / 访问路径 / 打开地址」、
+预览显示 `http://127.0.0.1:16601/`。
+
+新增 6 项测试：端口覆盖、未覆盖保持原行为、清除后回退、
+端口回退到 env、自定义子路径、强制网关。
+
 ### 0.78 补齐网关身份头（修复 fnOS gateway identity invalid）
 
 0.77 之后 fpkm 已能发现并采用 Lucky 实际创建的 socket：

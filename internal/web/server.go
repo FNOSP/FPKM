@@ -100,6 +100,8 @@ func (s *Server) Handler() http.Handler {
 	api := http.NewServeMux()
 	api.HandleFunc("/api/apps", s.handleApps)                    // GET 已安装列表
 	api.HandleFunc("/api/apps/", s.handleAppAction)              // POST /api/apps/{name}/{action}
+	api.HandleFunc("/api/access", s.handleAccessGet)             // GET  应用接入方式
+	api.HandleFunc("/api/access/set", s.handleAccessSet)         // POST 设置应用接入方式
 	api.HandleFunc("/api/wizard", s.handleWizard)                // GET 安装/卸载/配置向导
 	api.HandleFunc("/api/detail", s.handleAppDetail)             // GET 应用详情
 	api.HandleFunc("/api/store/apps", s.handleStoreApps)         // GET 远程应用（商店）
