@@ -1,0 +1,734 @@
+/* ==========================================================================
+   FPKM 桌面外壳
+   壁纸 + 图标网格 + 可拖动子窗口 + 玻璃质感任务栏 + 右侧小组件
+   ========================================================================== */
+
+/* 桌面壁纸。
+   图片由 /wallpaper.webp 提供（WebP 比同画质 JPEG 小约 45%），
+   JPEG 作为老浏览器兜底 —— 用 image-set 让浏览器自行挑选。
+   最下面一层是深色渐变：图片未加载出来时也不会露出白底。 */
+.fpkm-desktop {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background-color: #0b1220;
+  background-image: image-set(
+    url('/wallpaper.webp') type('image/webp'),
+    url('/wallpaper.jpg') type('image/jpeg')
+  );
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  color: #e6edf7;
+  user-select: none;
+  cursor: default;
+}
+
+/* 壁纸上叠加一层暗色薄纱（scrim）。
+   这张壁纸右侧偏亮，若不加压暗，白色图标文字会糊在背景里看不清；
+   同时稍微降低饱和度，避免背景比前景更抢眼。
+   用独立的伪元素而不是给 background 叠渐变，是为了不干扰 image-set。 */
+.fpkm-desktop::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* 只压"任务栏与右侧小组件"需要对比度的区域，
+     中间大片区域保持壁纸原样 —— 早期版本整屏 0.28~0.5 的黑纱
+     会把这张明亮的云海壁纸压成灰黑色，看起来"变黑了"。
+     这里改为很轻的整体微压 + 左上/右下轻微渐隐，
+     既保证图标文字可读，又保留壁纸本身的通透感。 */
+  background:
+    linear-gradient(180deg, rgba(6, 12, 24, 0.12) 0%, rgba(6, 12, 24, 0.02) 45%, rgba(6, 12, 24, 0.14) 100%);
+  z-index: 0;
+}
+
+/* 壁纸上的细网格光效，增强"科技感"，同时不干扰图标可读性 */
+.fpkm-desktop::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(148, 197, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 197, 255, 0.045) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(circle at 50% 40%, #000 25%, transparent 78%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ---------- 桌面区域 ---------- */
+
+/* 桌面可用区域：底部留给 Dock。
+   z-index 显式高于背景伪元素（网格/暗纱），否则后绘制的 ::after
+   会盖在图标与窗口之上（两者都是 z-index:0 时按 DOM 顺序绘制）。 */
+.fpkm-desktop-area {
+  position: absolute;
+  inset: 0 0 76px 0;
+  overflow: hidden;
+  z-index: 1;
+}
+
+/* ---------- 子窗口层 ----------
+
+   窗口放在任务栏**同级**的独立层里，而不是 .fpkm-desktop-area 内：
+     - 那个容器 overflow:hidden，会把拖到底部的窗口裁掉；
+     - 它的高度不含任务栏，bounds 因此永远到不了任务栏位置。
+
+   层级关系（从下到上）：
+     .fpkm-desktop-area  z-index: 1   （图标）
+     .fpkm-window-layer  z-index: 2   （窗口，窗口自身再叠加 10+）
+     .fpkm-dock          z-index: 9000（任务栏，始终最顶层）
+
+   因此窗口可以移动到任务栏的位置并盖住它，但任务栏永远可见、可点。
+   任务栏比窗口高这么多，也保证"拖动窗口时不会被窗口盖住"。 */
+.fpkm-window-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2; /* 低于任务栏（9000），高于图标层（1） */
+  pointer-events: none; /* 空白区域不挡桌面图标点击 */
+}
+
+/* 窗口自身要能接收事件 */
+.fpkm-window-layer > .fpkm-win {
+  pointer-events: auto;
+}
+
+.fpkm-desktop-icons {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  right: 340px; /* 给右侧小组件让位 */
+  bottom: 12px;
+  display: grid;
+  /* 列优先排列：先自上而下排满第一列，再排第二列（与真实桌面一致）。
+     行数由可用高度决定，auto-fill 的列用于承载溢出。 */
+  grid-auto-flow: column;
+  grid-template-rows: repeat(auto-fill, 100px);
+  grid-auto-columns: 96px;
+  gap: 6px 4px;
+  align-content: start;
+  justify-content: start;
+}
+
+/* 图标/菜单的包裹层：作为 Dropdown 的触发元素 */
+.fpkm-desk-slot {
+  display: inline-block;
+}
+
+/* 图标按钮 */
+.fpkm-desk-icon {
+  width: 96px;
+  height: 100px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: #e8eefb;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 8px 4px 6px;
+  cursor: pointer;
+  transition: background-color 0.14s ease, border-color 0.14s ease, transform 0.14s ease;
+  font-family: inherit;
+}
+
+.fpkm-desk-icon:hover {
+  background: rgba(148, 197, 255, 0.12);
+  border-color: rgba(148, 197, 255, 0.22);
+}
+
+.fpkm-desk-icon:active {
+  transform: scale(0.97);
+}
+
+/* 选中态：像真实桌面那样有半透明高亮框 */
+.fpkm-desk-icon-selected {
+  background: rgba(59, 130, 246, 0.25);
+  border-color: rgba(147, 197, 253, 0.55);
+}
+
+.fpkm-desk-icon-img {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  display: block;
+  flex-shrink: 0;
+}
+
+.fpkm-desk-icon-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 12px;
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: none;
+  /* 深色壁纸上给图标一点投影，避免浅色图标糊在背景里 */
+  filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.45));
+}
+
+/* 运行中小绿点 */
+.fpkm-desk-icon-dot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #22c55e;
+  border: 2px solid #0d1526;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.85);
+}
+
+.fpkm-desk-icon-label {
+  font-size: 12px;
+  line-height: 1.25;
+  text-align: center;
+  max-width: 88px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-all;
+  /* 不加背景色（按需求：图标文字下方不要色块）。
+     可读性完全由文字阴影提供 —— 用"细密多层投影"替代背景：
+     近处两层形成局部暗边，远处一层做柔和的整体衬托。
+     这样在明亮云海区域仍能读清白字，又不出现矩形色块。 */
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.9),
+    0 0 3px rgba(0, 0, 0, 0.75),
+    0 0 6px rgba(0, 0, 0, 0.45);
+}
+
+.fpkm-desktop-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ---------- 子窗口 ---------- */
+
+.fpkm-win {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #1b2436;
+  border: 1px solid rgba(148, 197, 255, 0.18);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.fpkm-win-active {
+  border-color: rgba(147, 197, 253, 0.5);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
+}
+
+/* 标题栏：可拖动 */
+.fpkm-win-bar {
+  position: relative;
+  z-index: 6; /* 高于缩放手柄（5）：保证标题栏区域始终可拖动 */
+  height: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px 0 12px;
+  background: linear-gradient(180deg, rgba(45, 60, 88, 0.96), rgba(32, 44, 66, 0.96));
+  border-bottom: 1px solid rgba(148, 197, 255, 0.14);
+  cursor: grab;
+}
+
+.fpkm-win-bar:active {
+  cursor: grabbing;
+}
+
+.fpkm-win-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #e6edf7;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.fpkm-win-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.fpkm-win-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* ---------- 窗口标题栏配色（必须在明/暗两种主题下都清晰） ----------
+
+   坑：窗口标题栏的底色由本文件固定为深色渐变，但 Semi 会给其中的
+   文本元素直接上色：
+     .semi-typography { color: var(--semi-color-text-0) }        → 深色
+     .semi-button-tertiary.semi-button-borderless { color: ... }  → 深色
+   这些规则与本文件的 `.fpkm-win-actions .semi-button` 权重相同（都是
+   2 个类），而 Vite 打包后的 CSS 顺序不一定与 import 顺序一致，
+   于是 Semi 的深色文字会盖在深色标题栏上 —— 看起来"黑得看不见"。
+
+   因此这里提高选择器权重并显式声明颜色（不依赖主题变量）。 */
+.fpkm-desktop .fpkm-win-title,
+.fpkm-desktop .fpkm-win-title .semi-typography {
+  color: #e6edf7 !important;
+}
+
+/* 刷新/最小化/最大化：浅色图标；关闭按钮保留红色（用 :not 排除） */
+.fpkm-desktop .fpkm-win-actions .semi-button:not(.semi-button-danger) {
+  color: #cbd5e1 !important;
+}
+
+.fpkm-desktop .fpkm-win-actions .semi-button:not(.semi-button-danger):hover {
+  background-color: rgba(148, 197, 255, 0.18) !important;
+  color: #ffffff !important;
+}
+
+/* 关闭按钮：保证红色在深色底上足够醒目 */
+.fpkm-desktop .fpkm-win-actions .semi-button-danger {
+  color: #ff6b5e !important;
+}
+
+.fpkm-desktop .fpkm-win-actions .semi-button-danger:hover {
+  background-color: rgba(255, 107, 94, 0.18) !important;
+  color: #ff8a80 !important;
+}
+
+.fpkm-win-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: #fff;
+}
+
+/* 内联内容（应用商店）：铺满窗口内容区 */
+.fpkm-win-inline {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.fpkm-win-inline > .fpkm-shell {
+  height: 100%;
+}
+
+.fpkm-win-iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+.fpkm-win-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+/* ------------------------------------------------------------------
+   Semino Spin 的 tip 文案宽度限制（修复"正在打开应用…"竖排）
+
+   Semi 的 DOM 结构是：
+     .semi-spin
+       └ .semi-spin-wrapper
+           ├ svg                    （图标）
+           └ div（无 class）        （提示文字）
+       └ .semi-spin-children        （内容包一层，本处为空）
+
+   文字所在的那个 div 是 wrapper 的行内子元素，而 wrapper 的宽度
+   由 spinner 自身决定（.semi-spin-large 约 32px）。于是文案被压成
+   32px 宽、逐字折行（实测 32x84，竖成一列）。
+
+   修法：让 wrapper 内的文字 div 按内容自然宽度排布，并且不换行。
+   这里用 `> div` 精确指向该节点，避免影响 Spin 的其它使用场景。
+   ------------------------------------------------------------------ */
+.fpkm-win-loading .semi-spin-wrapper > div {
+  width: auto;
+  max-width: none;
+  white-space: nowrap;
+}
+
+.fpkm-win-failed {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 28px;
+  background: #fff;
+}
+
+/* 拖动/缩放时覆盖在 iframe 上的透明遮罩。
+   作用：把指针事件留在父窗口，避免鼠标划过 iframe 时
+   事件进入其独立文档导致拖动卡顿或收不到 pointerup。 */
+.fpkm-win-dragshield {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  background: transparent;
+  cursor: grabbing;
+}
+
+/* ---------- 八向缩放手柄 ----------
+
+   重要：手柄不能压住标题栏。
+
+   之前的 bug（实测现象）：拖动窗口后窗口突然变成很小的一块。
+   原因不是"最小化"，而是**误触了缩放**：`.fpkm-win-resize-n`
+   原本 `top:-3px; height:6px` 且 `z-index:5`，而标题栏 `z-index:3` ——
+   也就是说窗口顶部 3px **实际落在缩放条上**，而不是标题栏。
+   用户从标题栏最上沿按下想拖动，结果是"从顶部缩放"，
+   往下拖就把窗口越缩越小（直到 MIN_W×MIN_H）。
+
+   修法：
+   1. 手柄不再跨越标题栏区域：`n` 条让出标题栏高度（top 从 40px 起）；
+   2. 降低手柄层级到标题栏之下（拖动手势优先）；
+   3. 顶部角落手柄限制在标题栏以下，避免与窗口按钮抢点击。
+   ------------------------------------------------------------ */
+
+.fpkm-win-resize {
+  position: absolute;
+  z-index: 5; /* 高于内容区与遮罩，保证边角可抓 */
+}
+
+/* 但顶部手柄必须让位给标题栏：标题栏区域的拖动优先。
+   做法是把顶部手柄的命中区域限制在标题栏**下沿以下**，
+   因此这里不靠 z-index 竞争，而是直接避开标题栏所占的空间。 */
+
+/* 顶部：从标题栏下沿开始，不与标题栏重叠 */
+.fpkm-win-resize-n { top: 40px; left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
+.fpkm-win-resize-s { bottom: -3px; left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
+.fpkm-win-resize-e { right: -3px; top: 8px; bottom: 8px; width: 6px; cursor: ew-resize; }
+.fpkm-win-resize-w { left: -3px; top: 8px; bottom: 8px; width: 6px; cursor: ew-resize; }
+
+/* 顶部两角同样下移到标题栏之下，避免遮挡窗口按钮 */
+.fpkm-win-resize-ne { top: 40px; right: -3px; width: 12px; height: 12px; cursor: nesw-resize; }
+.fpkm-win-resize-nw { top: 40px; left: -3px; width: 12px; height: 12px; cursor: nwse-resize; }
+.fpkm-win-resize-se { bottom: -3px; right: -3px; width: 12px; height: 12px; cursor: nwse-resize; }
+.fpkm-win-resize-sw { bottom: -3px; left: -3px; width: 12px; height: 12px; cursor: nesw-resize; }
+
+/* ---------- macOS 风格 Dock ---------- */
+
+.fpkm-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px 12px;
+  z-index: 9000;
+  pointer-events: none;
+}
+
+.fpkm-dock-inner {
+  pointer-events: auto;
+  max-width: calc(100% - 32px);
+  height: 60px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-radius: 20px;
+  /* 毛玻璃：半透明底 + 背景模糊 + 顶部高光 */
+  background: rgba(22, 32, 50, 0.55);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(160, 205, 255, 0.22);
+  box-shadow:
+    0 12px 38px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.fpkm-dock-inner::-webkit-scrollbar {
+  display: none;
+}
+
+.fpkm-dock-slot {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+/* 商店图标与普通应用之间的分隔线。
+   macOS 的 Dock 也用一条细线区分"特殊入口"和"普通应用"，
+   这里同时把右侧间距加大，让分组更清晰。 */
+.fpkm-dock-sep {
+  width: 1px;
+  height: 34px;
+  flex-shrink: 0;
+  margin: 0 10px 0 8px;
+  background: rgba(160, 205, 255, 0.28);
+  border-radius: 1px;
+}
+
+/* 单个 Dock 图标（只显示图标，不显示文字） */
+.fpkm-dock-item {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border: 1px solid transparent;
+  border-radius: 13px;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.16s ease, background-color 0.16s ease, border-color 0.16s ease;
+}
+
+.fpkm-dock-item:hover {
+  transform: translateY(-4px) scale(1.1);
+  background: rgba(148, 197, 255, 0.16);
+  border-color: rgba(148, 197, 255, 0.28);
+}
+
+.fpkm-dock-item:active {
+  transform: translateY(-1px) scale(1.02);
+}
+
+/* 活动窗口高亮 */
+.fpkm-dock-item-active {
+  background: rgba(59, 130, 246, 0.26);
+  border-color: rgba(147, 197, 253, 0.5);
+}
+
+.fpkm-dock-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  object-fit: contain;
+  pointer-events: none;
+  -webkit-user-drag: none;
+  user-select: none;
+  filter: drop-shadow(0 3px 7px rgba(0, 0, 0, 0.45));
+}
+
+/* 有打开窗口时的小圆点 */
+.fpkm-dock-dot {
+  position: absolute;
+  left: 50%;
+  bottom: 1px;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #e6edf7;
+  box-shadow: 0 0 5px rgba(230, 237, 247, 0.9);
+}
+
+/* ---------- 右侧小组件 ---------- */
+
+.fpkm-widgets {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 296px;
+  max-height: calc(100% - 32px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 2px;
+  scrollbar-width: thin;
+}
+
+.fpkm-widget {
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: rgba(20, 30, 48, 0.5);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  border: 1px solid rgba(160, 205, 255, 0.18);
+  box-shadow:
+    0 8px 26px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  color: #e6edf7;
+}
+
+.fpkm-widget-clock {
+  text-align: right;
+  padding: 12px 18px;
+}
+
+.fpkm-clock-time {
+  font-size: 40px;
+  font-weight: 300;
+  line-height: 1.05;
+  letter-spacing: 1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.fpkm-clock-date {
+  font-size: 12.5px;
+  color: rgba(203, 213, 225, 0.72);
+  margin-top: 4px;
+}
+
+.fpkm-widget-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: #e8eefb;
+}
+
+.fpkm-widget-title .semi-icon {
+  font-size: 15px;
+  color: #7dd3fc;
+}
+
+.fpkm-widget-pct {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 13px;
+  font-weight: 600;
+  color: #7dd3fc;
+}
+
+.fpkm-widget-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.fpkm-widget-gauge {
+  flex-shrink: 0;
+}
+
+.fpkm-widget-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fpkm-widget-col .semi-typography {
+  color: #e6edf7;
+}
+
+.fpkm-widget-kv {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12.5px;
+  padding: 5px 0;
+  border-top: 1px solid rgba(148, 197, 255, 0.1);
+}
+
+.fpkm-widget-kv span {
+  color: rgba(203, 213, 225, 0.78);
+}
+
+.fpkm-widget-kv b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.fpkm-widget-sub {
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(203, 213, 225, 0.75);
+  font-variant-numeric: tabular-nums;
+}
+
+.fpkm-widget-disk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 11.5px;
+}
+
+.fpkm-widget-disk-mount {
+  width: 62px;
+  flex-shrink: 0;
+  color: rgba(203, 213, 225, 0.72);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fpkm-widget-disk-pct {
+  width: 34px;
+  text-align: right;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: rgba(203, 213, 225, 0.85);
+}
+
+.fpkm-widget-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  text-align: center;
+}
+
+.fpkm-widget-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fpkm-widget-stats b {
+  font-size: 19px;
+  font-weight: 600;
+  color: #7dd3fc;
+  font-variant-numeric: tabular-nums;
+}
+
+.fpkm-widget-stats span {
+  font-size: 11px;
+  color: rgba(203, 213, 225, 0.7);
+}
+
+/* 小组件里的进度条在深色背景上的配色 */
+.fpkm-widget .semi-progress-track {
+  background-color: rgba(148, 197, 255, 0.16);
+}
+
+.fpkm-widget .semi-progress-circle-text {
+  color: #e6edf7;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* 窄屏：隐藏小组件，给图标让出空间 */
+@media (max-width: 900px) {
+  .fpkm-widgets {
+    display: none;
+  }
+  .fpkm-desktop-icons {
+    right: 18px;
+  }
+}

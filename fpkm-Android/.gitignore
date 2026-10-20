@@ -1,0 +1,31 @@
+# 依赖与构建产物
+node_modules/
+dist/
+web/dist/
+internal/web/dist/assets/
+
+# Android 构建产物
+*.apk
+*.aab
+*.ap_
+*.dex
+android-app/build/
+android-app/.gradle/
+android-app/app/build/
+android-app/local.properties
+
+# 上游源码快照（23MB，含 node_modules，无提交价值）
+FPKM-main.7z
+
+# 预编译二进制
+/fpkm
+/fpkm-linux
+/fpkm.exe
+/fpkm-android-*
+*.fpk
+
+# 编辑器与系统
+.DS_Store
+*.swp
+.idea/
+.vscode/

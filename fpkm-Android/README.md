@@ -1,0 +1,332 @@
+# FPKM · 飞牛应用包管理器
+
+**中文** · [English](README.en.md)
+
+<p align="center">
+  <img src="docs/banner.png" alt="FPKM × FNOSP" width="760">
+</p>
+
+<p align="center">
+  <a href="https://github.com/FNOSP/FPKM/stargazers"><img src="https://img.shields.io/github/stars/FNOSP/FPKM?style=flat-square&logo=github&label=Stars&color=2b6cff" alt="Stars"></a>
+  <a href="https://github.com/FNOSP/FPKM/network/members"><img src="https://img.shields.io/github/forks/FNOSP/FPKM?style=flat-square&logo=github&label=Forks&color=2b6cff" alt="Forks"></a>
+  <a href="https://github.com/FNOSP/FPKM/issues"><img src="https://img.shields.io/github/issues/FNOSP/FPKM?style=flat-square&logo=github&label=Issues&color=e3b341" alt="Issues"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/FNOSP/FPKM?style=flat-square&label=License&color=e05d44" alt="License"></a>
+  <img src="https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
+  <img src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React">
+  <img src="https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20%7C%20macOS-2b6cff?style=flat-square&logo=linux&logoColor=white" alt="Platform">
+</p>
+
+<p align="center">
+  <b>让 <code>.fpk</code> 离线安装包跑在任何 Linux 上 —— 不需要 fnOS</b>
+</p>
+
+---
+
+FPKM（FeiNiu PacKage Manager）是一个用 Go 编写的 `.fpk` 应用包管理器。
+它复刻了 fnOS 的应用安装与运行环境，使飞牛生态里的应用包可以在普通
+Linux 发行版、容器、甚至开发机上直接安装和运行。
+
+```
+你的 Arch / Ubuntu / Debian / CentOS  … 装的是 .fpk 应用包
+```
+
+![FPKM 桌面](docs/screenshots/desktop.webp)
+
+
+## 为什么需要 FPKM
+
+飞牛 fnOS 的应用以 `.fpk` 包分发，包内是一个完整的运行时约定：
+`manifest` 描述元数据、`cmd/main` 管理生命周期、`app.tgz` 存放程序本体，
+运行期依赖一整套 `TRIM_*` 环境变量、`/var/apps/{appname}` 之类的固定路径，
+以及一个统一的 Unix Socket 网关。
+
+这套约定只存在于 fnOS 上。一旦离开 fnOS：
+
+- 直接解压 `.fpk` 跑不起来（缺环境变量、缺路径、缺网关）
+- 大量应用把安装路径、socket 位置硬编码在二进制里
+- 网关负责鉴权并注入用户身份头，没有它应用会拒绝服务
+
+**FPKM 的工作就是把这套运行环境完整地在普通 Linux 上重建出来。**
+
+---
+
+## 核心特性
+
+### 完整的 `.fpk` 生命周期
+
+```bash
+fpkm install  app.fpk      # 安装
+fpkm start    myapp        # 启动
+fpkm status   myapp        # 状态
+fpkm stop     myapp        # 停止
+fpkm upgrade  app.fpk      # 升级（保留数据）
+fpkm uninstall myapp       # 卸载
+fpkm list                  # 列出已安装
+```
+
+### 自动识别六种应用形态
+
+`.fpk` 包内部结构千差万别，FPKM 会自动探测入口类型：
+
+| 类型 | 说明 |
+|------|------|
+| 原生二进制 | `bin/` 下的 ELF，最常见 |
+| `cmd/main` 脚本 | 由脚本管理进程与 PID |
+| Node.js | 自动执行 `npm install --omit=dev` 安装依赖 |
+| Python | 调用 `python3` 运行脚本（依赖需自行准备） |
+| 静态站点 | 内置静态文件服务器 |
+| Docker | 检测并提示 Rootless Docker 要求 |
+
+### 兼容飞牛原生路径（关键能力）
+
+许多飞牛应用的二进制里**硬编码**了 fnOS 的路径，无法通过改代码修正。
+FPKM 会在安装/启动时自动建立符号链接，把硬编码路径重定向到实际位置：
+
+```
+/var/apps/{appname}                       → 安装目录
+/vol1/@appdata/{appname}                  → 数据目录
+/vol1/@appcenter/{appname}                → 程序目录
+```
+
+安装时还会重写 `cmd/main` 等脚本里的硬编码路径，让原版脚本无需修改即可运行。
+
+### 统一网关
+
+复刻飞牛的统一网关：把 `/app/{appname}` 的 HTTP / WebSocket / FastCGI 请求
+转发到应用监听的 Unix Socket。
+
+- 内置 Go 实现，**零外部依赖**，不需要 nginx
+- **受 FPKM 登录保护**：未登录访问 `/app/*` 会被拦到登录页，
+  因此应用不会绕过鉴权被匿名访问
+- 请求注入 `X-Trim-Userid` / `X-Trim-Username` / `X-Trim-Isadmin` 身份头
+- 支持应用启动前等待 Socket 就绪，并给出可诊断的超时原因
+
+### 数据自包含
+
+所有数据存放在**可执行文件旁的 `data/` 目录**：
+
+```
+./fpkm
+./data/
+├── apps/{应用名}/     应用安装目录
+├── password.json      管理密码（PBKDF2 加盐）
+├── sources.json       应用源
+└── logs/
+```
+
+数据跟着程序走，不依赖 `$HOME`。换用户、用 `sudo`、放进容器，
+看到的都是同一份数据 —— 不会出现"换个身份启动，应用全消失"。
+
+### 跨平台
+
+Windows / macOS / Linux 均可运行（`fpkm.exe`、`fpkm` 同名命令）。
+架构识别覆盖 `amd64` / `arm64`，并能在安装前校验二进制是否与当前平台兼容。
+
+---
+
+## 两种使用方式
+
+### 命令行
+
+```bash
+./fpkm install  ~/Downloads/fnos-quark.fpk
+./fpkm start    fnos-quark
+./fpkm status   fnos-quark
+```
+
+### Web 界面（桌面形态）
+
+```bash
+./fpkm web --bind 0.0.0.0 --port 7666
+```
+
+打开浏览器即可获得一个完整的桌面环境，内置应用商店与已安装应用管理：
+
+- 浏览远程应用源、一键安装
+- 从本地文件或上传 `.fpk` 安装
+- 应用以子窗口（`iframe`）或新标签页打开，按应用自身配置决定
+- 每个应用可单独设置接入方式：**端口直连 / 统一网关 / CGI**
+
+**应用商店** —— 浏览应用源、一键安装，已安装应用可直接打开：
+
+![应用商店](docs/screenshots/store.webp)
+
+**多窗口并行** —— 多个应用可同时以子窗口打开，自由拖动与缩放，
+任务栏始终在最顶层：
+
+![多窗口与任务栏](docs/screenshots/windows.webp)
+
+**登录保护** —— 首次访问设置管理密码，之后凭密码登录：
+
+<img src="docs/screenshots/login.webp" alt="登录页" width="760">
+
+---
+
+## Docker 部署
+
+镜像：**`qilinzhu/fpkm`**（支持 `linux/amd64` / `linux/arm64`）
+
+### docker run
+
+```bash
+docker run -d \
+  --name fpkm \
+  -p 7666:7666 \
+  -v /path/to/fpkm-data:/app/data \
+  --restart unless-stopped \
+  qilinzhu/fpkm:latest
+```
+
+### docker compose
+
+```yaml
+services:
+  fpkm:
+    image: qilinzhu/fpkm:latest
+    container_name: fpkm
+    ports:
+      - "7666:7666"
+    volumes:
+      # 必须持久化，否则重建容器会丢失已安装应用与密码
+      - ./fpkm-data:/app/data
+    restart: unless-stopped
+```
+
+保存为 `compose.yaml` 后：
+
+```bash
+docker compose up -d
+```
+
+两种方式启动后，浏览器打开 `http://<宿主机IP>:7666`，首次访问设置管理密码。
+
+> **数据目录必须挂载**。FPKM 的应用、密码、应用源都存在 `/app/data`，
+> 不挂载的话 `docker rm` 后全部丢失。
+
+镜像基于 `debian-slim` 而非 alpine —— 实测部分 `.fpk` 内的 ELF 依赖 glibc，
+alpine 的 musl 环境会直接运行失败。详见 [Docker 部署文档](docs/DOCKER.md)。
+
+## 快速开始
+
+### 从源码构建
+
+需要 Go 1.24+ 与 Node.js（仅构建 Web 界面时需要）。
+
+```bash
+git clone <repo-url> fpkm
+cd fpkm
+
+# 构建前端（产物会内嵌进二进制）
+./scripts/build-web.sh
+
+# 构建二进制
+./build.sh native
+```
+
+产物在 `dist/fpkm`，`data/` 会自动创建在它旁边。
+
+### 运行
+
+```bash
+cd dist
+./fpkm web --bind 0.0.0.0 --port 7666
+```
+
+首次访问会让你设置管理密码，之后即可安装应用。
+
+---
+
+## 已知边界
+
+FPKM 的目标是**尽可能**跑起真实的 `.fpk` 包，但飞牛生态中存在一些
+厂商私有机制，属于已知边界：
+
+| 情况 | 说明 |
+|------|------|
+| 硬编码 fnOS 路径 | ✅ 通过符号链接自动兼容 |
+| 需要 fnOS 网关签名 | ⚠️ 部分应用校验飞牛私有签名，可用「端口直连」方式绕开 |
+| 依赖 fnOS 系统服务 | ⚠️ 极少数应用（如需调用 fnOS API）无法完全模拟 |
+| Rootless Docker | ⚠️ Docker 类应用需自行准备运行环境 |
+
+遇到应用跑不起来时，Web 界面会直接给出原因（缺 `manifest`、权限不足、
+Socket 超时等），而不是静默失败。
+
+---
+
+## 项目结构
+
+```
+cmd/                CLI 命令（cobra）
+internal/
+├── app/            应用生命周期：安装、启动、进程、入口探测、路径兼容
+├── fpk/            .fpk 包解析：manifest、解压、i18n、架构校验
+├── gateway/        统一网关：HTTP / WebSocket / FastCGI 反向代理
+├── web/            Web 服务与 REST API
+├── config/         配置与数据目录
+├── session/        HMAC 会话令牌
+└── logger/         日志
+web/                React + TypeScript + Semi Design 前端
+scripts/            构建脚本
+```
+
+---
+
+## 安全提示
+
+FPKM 会安装并运行任意程序，等同于在本机执行代码。
+
+- 只安装来源可信的 `.fpk` 包
+- 不要把管理端口直接暴露到公网，建议配合反向代理与 HTTPS
+- 管理密码以 PBKDF2-HMAC-SHA256 加盐存储，但仍请使用强密码
+
+---
+
+## 应用兼容性与实测结果
+
+FPKM 无法保证每一个 `.fpk` 都能完美运行 —— 飞牛生态里存在厂商私有机制，
+不同应用的实现方式也千差万别。**哪些应用能跑、哪些需要变通**，靠一个人的
+测试是覆盖不完的，所以我们把实测结果整理成了一张公开表格：
+
+### 📋 [FPKM 应用兼容性查询表](https://www.kdocs.cn/l/ceGUrJxQZoOM)
+
+表格记录了每个应用的实际运行情况：能否安装、能否启动、访问方式、
+遇到的问题与解决办法。安装前先查一下，可以少走很多弯路。
+
+### 欢迎提交你的测试结果
+
+如果你成功（或失败）运行了某个 `.fpk`，非常欢迎反馈到
+[Issues](https://github.com/FNOSP/FPKM/issues) —— 一两条信息对后来者
+就是实打实的帮助。
+
+提交时建议附上：
+
+| 项目 | 说明 |
+|------|------|
+| 应用名称与版本 | 例如 `fnos-quark 0.7` |
+| 系统环境 | 发行版与版本（如 `Ubuntu 24.04` / `Debian 12`）、CPU 架构 |
+| FPKM 版本 | `./fpkm version` 的输出 |
+| 运行结果 | ✅ 完全正常 / ⚠️ 部分可用 / ❌ 无法运行 |
+| 访问方式 | 统一网关 / 端口直连 / CGI |
+| 问题与日志 | 报错信息、`data/logs/` 相关片段 |
+| 解决办法 | 若你已绕过问题，请写明做法 |
+
+> 提交前请先搜索是否已有相同应用的报告，避免重复；
+> 也欢迎直接修正兼容性表格中不准确的条目。
+
+如果遇到问题，也可以先看 [已知边界](#已知边界) 中的说明，
+以及 Web 界面给出的具体报错原因。
+
+---
+
+## 致谢
+
+飞牛 fnOS 提供了 `.fpk` 这套应用分发格式与配套的运行时约定，
+FPKM 只是把这套约定在飞牛之外重新实现了一遍。
+
+---
+
+## License
+
+[Apache License 2.0](LICENSE) © 2026 FPKM contributors
+
+可自由使用、修改、分发（含商业用途），需保留版权与许可声明。

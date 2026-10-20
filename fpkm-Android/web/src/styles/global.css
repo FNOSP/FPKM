@@ -1,0 +1,1445 @@
+/* 全局样式：仅补充 Semi Design 未覆盖的少量布局与终端风格 */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--semi-color-bg-0);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', sans-serif;
+}
+
+/* ---------- 应用骨架 ---------- */
+.fpkm-layout {
+  height: 100%;
+}
+
+.fpkm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  height: 56px;
+  background: var(--semi-color-bg-1);
+  border-bottom: 1px solid var(--semi-color-border);
+  flex-shrink: 0;
+}
+
+.fpkm-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+}
+
+/* FPKM 图标（图片）。不再用渐变底 + 字母，
+   图标自带蓝色调，因此只保留尺寸与圆角。 */
+.fpkm-logo-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  object-fit: contain;
+  flex-shrink: 0;
+  display: block;
+}
+
+.fpkm-content {
+  height: calc(100% - 56px);
+  padding: 20px;
+  overflow: auto;
+}
+
+.fpkm-container {
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+/* ---------- 应用卡片 ---------- */
+.fpkm-app-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 16px;
+}
+
+.fpkm-app-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.fpkm-app-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.fpkm-app-icon {
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: var(--semi-color-fill-0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--semi-color-text-2);
+  font-size: 20px;
+  overflow: hidden;
+}
+
+.fpkm-app-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fpkm-app-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+  margin-bottom: 2px;
+  word-break: break-all;
+}
+
+.fpkm-app-sub {
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* 标签区：固定两行高度。
+   一行标签约 21px，两行 + 行间距 ≈ 46px。
+   无端口时第二行留空，保证同一行卡片高度一致、按钮对齐。 */
+.fpkm-app-tags {
+  margin-top: 6px;
+  height: 46px;
+  overflow: hidden;
+}
+
+.fpkm-app-tags .semi-space {
+  align-content: flex-start;
+}
+
+/* 端口标签：用偏中性但可辨识的配色，避免与"运行中"抢注意力 */
+.fpkm-tag-port {
+  background-color: var(--semi-color-fill-0) !important;
+  color: var(--semi-color-text-1) !important;
+  border: 1px solid var(--semi-color-border) !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.fpkm-app-desc {
+  margin-top: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--semi-color-text-1);
+  min-height: 42px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.fpkm-app-actions {
+  margin-top: 14px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.fpkm-card-footer {
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+/* ---------- 终端日志 ---------- */
+.fpkm-log {
+  background: #1c1f23;
+  color: #d4d4d4;
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.fpkm-log-line {
+  display: flex;
+  gap: 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.fpkm-log-time {
+  color: #6a737d;
+  flex-shrink: 0;
+}
+
+.fpkm-log-level {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.fpkm-log-text {
+  flex: 1;
+}
+
+.fpkm-log-dim {
+  color: #6a737d;
+}
+
+/* ---------- 文件浏览器 ---------- */
+.fpkm-fs-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--semi-color-text-1);
+  background: var(--semi-color-fill-0);
+  padding: 6px 10px;
+  border-radius: 6px;
+  word-break: break-all;
+}
+
+.fpkm-fs-row {
+  cursor: pointer;
+}
+
+.fpkm-fs-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  word-break: break-all;
+}
+
+.fpkm-fs-icon-dir {
+  color: var(--semi-color-primary);
+}
+
+.fpkm-fs-icon-file {
+  color: var(--semi-color-warning);
+}
+
+/* ---------- 上传区 ---------- */
+.fpkm-dropzone {
+  border: 1px dashed var(--semi-color-border);
+  border-radius: 8px;
+  padding: 32px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: var(--semi-color-fill-0);
+}
+
+.fpkm-dropzone:hover,
+.fpkm-dropzone-active {
+  border-color: var(--semi-color-primary);
+  background: var(--semi-color-primary-light-default);
+}
+
+.fpkm-dropzone-icon {
+  font-size: 32px;
+  color: var(--semi-color-text-2);
+  margin-bottom: 10px;
+}
+
+/* ---------- 包信息卡 ---------- */
+.fpkm-pkg-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  font-size: 13px;
+}
+
+.fpkm-pkg-meta dt {
+  color: var(--semi-color-text-2);
+  white-space: nowrap;
+}
+
+.fpkm-pkg-meta dd {
+  margin: 0;
+  color: var(--semi-color-text-0);
+  word-break: break-all;
+}
+
+/* ---------- 登录页 ---------- */
+
+/* 登录页也用桌面壁纸，保持视觉统一。
+   壁纸资源与桌面共用 /wallpaper.webp（image-set 让浏览器挑格式），
+   叠加一层暗色薄纱保证表单可读性 —— 这张壁纸天空偏亮，
+   不压暗的话白色卡片边缘与浅色文字会糊在一起。 */
+.fpkm-login-wrap {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background-color: #0b1220;
+  background-image: image-set(
+    url('/wallpaper.webp') type('image/webp'),
+    url('/wallpaper.jpg') type('image/jpeg')
+  );
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  position: relative;
+}
+
+/* 暗色薄纱（独立伪元素，避免干扰 image-set） */
+.fpkm-login-wrap::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgba(6, 12, 24, 0.45) 0%,
+    rgba(6, 12, 24, 0.3) 45%,
+    rgba(6, 12, 24, 0.55) 100%
+  );
+}
+
+/* 卡片浮在薄纱之上，并加强阴影让它在图片背景上更清晰 */
+.fpkm-login-wrap > * {
+  position: relative;
+  z-index: 1;
+}
+
+.fpkm-login-card {
+  width: 100%;
+  max-width: 420px;
+}
+
+.fpkm-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+
+/* ================= 商店布局：左侧边栏 + 主区 ================= */
+
+.fpkm-shell {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ---------- 侧边栏 ---------- */
+
+/* ---------- 侧边栏（含滚动条样式） ----------
+
+   应用商店在桌面子窗口里打开时，侧边栏高度有限会出现滚动条。
+   系统默认滚动条又粗又深，很抢眼。
+
+   需求：
+   - 平时隐藏，鼠标移到侧边栏才显示；
+   - 更细、颜色为半透明灰；
+   - Firefox 用标准属性，WebKit 用 ::-webkit-scrollbar。
+
+   实现：默认把滑块设为透明（仍保留滚动能力），
+   .fpkm-side:hover 时再显示。滚动条本身预留 6px 宽度，
+   不会因为突然出现/消失导致内容左右跳动。
+   ------------------------------------------------------------ */
+.fpkm-side {
+  width: 208px;
+  flex-shrink: 0;
+  background: #fff;
+  border-right: 1px solid var(--semi-color-border);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  /* 不预留 gutter：侧边栏大多数时候不溢出，
+     强制预留会让内容区凭空窄 6px。这里接受"出现滚动条时轻微位移"。 */
+
+  /* 注意：这里**不设置**标准的 scrollbar-width / scrollbar-color。
+     Chrome 一旦看到 scrollbar-color 就会改用标准滚动条渲染，
+     那套渲染不认 ::-webkit-scrollbar-thumb 的 hover 规则，
+     导致"平时透明、悬停显现"的效果失效（实测如此）。
+     只在 @supports not selector(::-webkit-scrollbar) 的 Firefox 分支里设置。 */
+}
+
+/* Firefox：标准属性（Chrome/Safari 走下面的 WebKit 伪元素） */
+@supports not selector(::-webkit-scrollbar) {
+  .fpkm-side {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+  .fpkm-side:hover {
+    scrollbar-color: rgba(0, 0, 0, 0.22) transparent;
+  }
+}
+
+/* WebKit（Chrome / Edge / Safari）：默认透明，悬停时显现 */
+.fpkm-side::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.fpkm-side::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.fpkm-side::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+  /* 让颜色变化更柔和 */
+  transition: background-color 0.15s ease;
+}
+
+.fpkm-side:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.22);
+}
+
+.fpkm-side::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.35);
+}
+
+/* 去掉两端箭头按钮（旧版 WebKit 会显示） */
+.fpkm-side::-webkit-scrollbar-button {
+  display: none;
+}
+
+.fpkm-side::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.fpkm-side-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 18px 14px;
+}
+
+.fpkm-side-logo {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  object-fit: contain;
+  flex-shrink: 0;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.fpkm-side-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+  line-height: 1.2;
+}
+
+.fpkm-side-sub {
+  font-size: 11px;
+  color: var(--semi-color-text-2);
+  margin-top: 2px;
+}
+
+.fpkm-nav {
+  padding: 6px 10px 14px;
+  flex: 1;
+}
+
+.fpkm-nav-group-title {
+  font-size: 11px;
+  color: var(--semi-color-text-2);
+  padding: 12px 10px 6px;
+  letter-spacing: 0.5px;
+}
+
+.fpkm-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  color: var(--semi-color-text-1);
+  cursor: pointer;
+  margin-bottom: 2px;
+  transition: background 0.15s, color 0.15s;
+  user-select: none;
+}
+
+.fpkm-nav-item:hover {
+  background: var(--semi-color-fill-0);
+}
+
+.fpkm-nav-item-active {
+  background: #e8f0ff;
+  color: #2b6cff;
+  font-weight: 600;
+}
+
+.fpkm-nav-item-active .semi-icon {
+  color: #2b6cff;
+}
+
+.fpkm-nav-badge {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--semi-color-text-2);
+  background: var(--semi-color-fill-0);
+  border-radius: 9px;
+  padding: 1px 7px;
+}
+
+/* ---------- 主区域 ---------- */
+
+.fpkm-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.fpkm-top {
+  height: 60px;
+  flex-shrink: 0;
+  background: #fff;
+  border-bottom: 1px solid var(--semi-color-border);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 22px;
+}
+
+.fpkm-top-search {
+  flex: 1;
+  max-width: 520px;
+}
+
+.fpkm-top-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 右上角图标按钮：无背景，悬停显示浅色底 */
+.fpkm-icon-btn.semi-button {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 8px;
+  background: transparent !important;
+  color: var(--semi-color-text-1) !important;
+  font-size: 16px;
+}
+
+.fpkm-icon-btn.semi-button:hover {
+  background: var(--semi-color-fill-0) !important;
+  color: var(--semi-color-text-0) !important;
+}
+
+.fpkm-icon-btn.semi-button .semi-icon {
+  color: inherit !important;
+}
+
+.fpkm-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 22px 40px;
+}
+
+/* ---------- 首页横幅 ---------- */
+
+.fpkm-banner {
+  border-radius: 14px;
+  padding: 30px 34px;
+  margin-bottom: 20px;
+  background: linear-gradient(120deg, #eaf2ff 0%, #dce9ff 45%, #cfe0ff 100%);
+  position: relative;
+  overflow: hidden;
+  min-height: 150px;
+}
+
+.fpkm-banner-title {
+  font-size: 27px;
+  font-weight: 700;
+  color: #17335e;
+  margin-bottom: 8px;
+}
+
+.fpkm-banner-sub {
+  font-size: 14px;
+  color: #476b9e;
+  margin-bottom: 18px;
+}
+
+.fpkm-banner-art {
+  position: absolute;
+  right: 34px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0.85;
+  pointer-events: none;
+  line-height: 0;
+}
+
+/* ---------- 分类条 ---------- */
+
+.fpkm-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.fpkm-chip {
+  padding: 6px 14px;
+  border-radius: 18px;
+  font-size: 13px;
+  cursor: pointer;
+  background: #fff;
+  color: var(--semi-color-text-1);
+  border: 1px solid var(--semi-color-border);
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.fpkm-chip:hover {
+  border-color: #2b6cff;
+  color: #2b6cff;
+}
+
+.fpkm-chip-active {
+  background: #2b6cff;
+  border-color: #2b6cff;
+  color: #fff;
+  font-weight: 500;
+}
+
+/* ---------- 应用卡片网格 ---------- */
+
+.fpkm-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.fpkm-store-card {
+  background: #fff;
+  border: 1px solid var(--semi-color-border);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  transition: box-shadow 0.18s, transform 0.18s;
+}
+
+.fpkm-store-card:hover {
+  box-shadow: 0 6px 20px rgba(43, 108, 255, 0.1);
+  transform: translateY(-1px);
+}
+
+.fpkm-store-card-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.fpkm-store-icon {
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background: var(--semi-color-fill-0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 20px;
+  color: var(--semi-color-text-2);
+}
+
+.fpkm-store-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fpkm-store-icon-fallback {
+  font-size: 20px;
+  font-weight: 600;
+  color: #2b6cff;
+}
+
+.fpkm-store-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.fpkm-store-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+}
+
+.fpkm-store-desc {
+  margin-top: 10px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--semi-color-text-2);
+  min-height: 40px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.fpkm-store-foot {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--semi-color-fill-0);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.fpkm-store-meta {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.fpkm-tag {
+  background: #eef4ff !important;
+  color: #2b6cff !important;
+  border: none !important;
+}
+
+/* ---------- 通用 ---------- */
+
+.fpkm-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.fpkm-section-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+  margin: 0 0 4px;
+}
+
+.fpkm-section-sub {
+  font-size: 12.5px;
+  color: var(--semi-color-text-2);
+  margin-bottom: 16px;
+}
+
+.fpkm-source-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--semi-color-fill-0);
+}
+
+.fpkm-source-row:last-child {
+  border-bottom: none;
+}
+
+/* ================= 按钮体系 =================
+   设计目标：层级清晰、克制、不刺眼。
+
+   层级（从重到轻）：
+     1. 主操作   实心蓝       启动 / 安装
+     2. 次操作   淡蓝底蓝字    安装卡片内 / 更新
+     3. 一般操作 白底细边框   打开
+     4. 提示操作 蓝字+淡蓝边  升级
+     5. 危险操作 淡红底红字   卸载（hover 才变实心红）
+
+   早先的实现里，停止/打开/卸载分别是"淡蓝底""淡蓝底""高饱和红"，
+   前两者视觉完全相同、第三者过于刺眼，因此这里重整配色。
+   ============================================ */
+
+/* ---------- 统一圆角与高度 ---------- */
+
+/* 所有按钮统一圆角（Semi 默认约 3px，偏方） */
+.fpkm-shell .semi-button {
+  border-radius: 10px;
+}
+
+/* 高度整体加大：小尺寸 24→30px，常规 32→36px */
+.fpkm-shell .semi-button.semi-button-size-small {
+  height: 30px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-radius: 9px;
+}
+
+.fpkm-shell .semi-button:not(.semi-button-size-small):not(.semi-button-size-large) {
+  height: 36px;
+}
+
+.fpkm-shell .semi-button.semi-button-size-large {
+  height: 42px;
+}
+
+/* 右上角图标按钮不参与高度覆盖（保持正方形） */
+.fpkm-shell .fpkm-icon-btn.semi-button {
+  height: 36px;
+  width: 36px;
+  padding: 0;
+}
+
+/* ---------- 1. 主操作：实心蓝 ---------- */
+
+.fpkm-shell .semi-button-primary.semi-button-solid {
+  background-color: #2b6cff;
+  color: #fff;
+}
+
+.fpkm-shell .semi-button-primary.semi-button-solid:hover {
+  background-color: #1d5ce8;
+  color: #fff;
+}
+
+/* ---------- 2. 次操作：淡蓝底 + 蓝字（安装/更新） ---------- */
+
+.fpkm-shell .semi-button-primary.semi-button-light {
+  background-color: #eef4ff;
+  color: #2b6cff;
+}
+
+.fpkm-shell .semi-button-primary.semi-button-light:hover {
+  background-color: #dfeaff;
+  color: #1d5ce8;
+}
+
+.fpkm-shell .semi-button-primary.semi-button-light .semi-icon {
+  color: inherit;
+}
+
+/* ---------- 3. 一般操作：白底细边框（停止 / 应用设置） ---------- */
+
+.fpkm-shell .fpkm-btn-neutral.semi-button {
+  background-color: #fff;
+  color: var(--semi-color-text-1);
+  border: 1px solid var(--semi-color-border);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+
+.fpkm-shell .fpkm-btn-neutral.semi-button:hover {
+  background-color: var(--semi-color-fill-0);
+  color: var(--semi-color-text-0);
+  border-color: rgba(var(--semi-grey-9), 0.16);
+}
+
+.fpkm-shell .fpkm-btn-neutral.semi-button .semi-icon {
+  color: inherit;
+}
+
+/* 详情页「应用设置」：浅灰底、无边框（参考飞牛应用中心） */
+.fpkm-shell .fpkm-detail-settings.semi-button {
+  background-color: var(--semi-color-fill-0);
+  color: var(--semi-color-text-0);
+  border: none;
+}
+
+.fpkm-shell .fpkm-detail-settings.semi-button:hover:not(.semi-button-disabled) {
+  background-color: var(--semi-color-fill-1);
+}
+
+.fpkm-shell .fpkm-detail-settings.semi-button .semi-icon {
+  color: inherit;
+}
+
+/* ---------- 4. 提示操作：蓝字 + 淡蓝描边（升级） ---------- */
+
+.fpkm-shell .fpkm-btn-outline.semi-button {
+  background-color: transparent;
+  color: #2b6cff;
+  border: 1px solid rgba(43, 108, 255, 0.35);
+}
+
+.fpkm-shell .fpkm-btn-outline.semi-button:hover {
+  background-color: #eef4ff;
+  border-color: rgba(43, 108, 255, 0.55);
+  color: #1d5ce8;
+}
+
+.fpkm-shell .fpkm-btn-outline.semi-button .semi-icon {
+  color: inherit;
+}
+
+/* ---------- 5. 危险操作：淡红底 + 红字，hover 才实心 ---------- */
+
+.fpkm-shell .fpkm-danger-btn.semi-button-danger {
+  background-color: rgba(var(--semi-red-0), 1);
+  color: rgb(var(--semi-red-5));
+  border: 1px solid transparent;
+}
+
+.fpkm-shell .fpkm-danger-btn.semi-button-danger:hover:not(.semi-button-disabled) {
+  background-color: rgb(var(--semi-red-5));
+  color: #fff;
+}
+
+.fpkm-shell .fpkm-danger-btn.semi-button-danger .semi-icon {
+  color: inherit;
+}
+
+.fpkm-shell .fpkm-danger-btn.semi-button-danger.semi-button-disabled,
+.fpkm-shell .fpkm-danger-btn.semi-button-danger:disabled {
+  background-color: rgba(var(--semi-red-0), 0.6);
+  color: rgba(var(--semi-red-5), 0.5);
+  opacity: 1;
+}
+
+/* 无背景主题：保持透明，仅文字用主色 */
+.fpkm-shell .semi-button-primary.semi-button-borderless {
+  background-color: transparent;
+  color: #2b6cff;
+}
+
+.fpkm-shell .semi-button-primary.semi-button-borderless:hover {
+  background-color: var(--semi-color-fill-0);
+  color: #1d5ce8;
+}
+
+/* ================= 向导弹窗 ================= */
+
+/* 固定高度：内容少的步骤（如图二的纯说明）与内容多的步骤
+   （如带多个输入框的配置页）弹窗大小保持一致，避免跳动。 */
+.fpkm-wizard-body {
+  height: 46vh;
+  min-height: 240px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.fpkm-wizard-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fpkm-wizard-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 字段标签：比正文更粗，形成层级（参考官方向导） */
+.fpkm-wizard-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+  line-height: 1.5;
+}
+
+/* 必填星号 */
+.fpkm-wizard-required {
+  color: var(--semi-color-danger);
+  font-weight: 600;
+}
+
+.fpkm-wizard-error {
+  margin-top: 2px;
+}
+
+.fpkm-wizard-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* 提示文本：保留富文本排版（真实向导里大量使用 <br> 与强调标签）。
+   不加背景色 —— 与官方向导一致，纯文字即可。 */
+.fpkm-wizard-tips {
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: var(--semi-color-text-1);
+  background: transparent;
+  padding: 0;
+  word-break: break-word;
+}
+
+/* 紧跟在输入框之后的说明文字：字号更小、颜色更淡，
+   与"标题/标签"形成视觉层级 */
+.fpkm-wizard-tips-help {
+  font-size: 12.5px;
+  color: var(--semi-color-text-2);
+  line-height: 1.6;
+  margin-top: -2px;
+}
+
+.fpkm-wizard-tips:empty {
+  display: none;
+}
+
+.fpkm-wizard-tips code {
+  background: var(--semi-color-fill-0);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.fpkm-wizard-tips strong,
+.fpkm-wizard-tips b {
+  color: var(--semi-color-text-0);
+  font-weight: 600;
+}
+
+.fpkm-wizard-tips a {
+  color: #2b6cff;
+}
+
+/* 小节标题式的提示（其后紧跟输入字段），如图三的「端口号设置」 */
+.fpkm-wizard-tips-heading {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+  margin-top: 4px;
+}
+
+/* ================= 应用详情页 ================= */
+
+.fpkm-detail {
+  max-width: 1100px;
+  /* 详情页是浏览页，正文只读；避免标题/字段出现文本插入符 */
+  cursor: default;
+}
+
+.fpkm-detail-back {
+  margin-bottom: 6px;
+  margin-left: -8px;
+}
+
+.fpkm-detail-head {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  padding-bottom: 20px;
+}
+
+.fpkm-detail-icon {
+  width: 96px;
+  height: 96px;
+  flex-shrink: 0;
+  border-radius: 18px;
+  background: var(--semi-color-fill-0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  /* 图标是纯图形，不是可编辑内容。
+     否则浏览器会把光标插入符放进这个容器（点击/拖拽时左上角出现
+     闪烁的文本光标），看起来像"输入框"。这里禁用选择与插入符。 */
+  user-select: none;
+  caret-color: transparent;
+  cursor: default;
+}
+
+.fpkm-detail-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* 图片本身也不参与文本选择与拖拽 */
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
+/* 详情页头部：图标包裹层与图片链接不产生插入符。
+   注意只针对图标区域，标题与描述仍要保持可选中（便于复制应用名）。 */
+.fpkm-detail-icon,
+.fpkm-detail-icon * {
+  user-select: none;
+  caret-color: transparent;
+  -webkit-user-drag: none;
+}
+
+/* 详情页内所有图片（介绍里的截图等）不参与拖拽/选择 */
+.fpkm-detail img {
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.fpkm-detail-icon-fallback {
+  font-size: 38px;
+  font-weight: 600;
+  color: #2b6cff;
+}
+
+.fpkm-detail-headmain {
+  flex: 1;
+  min-width: 0;
+}
+
+.fpkm-detail-sub {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--semi-color-text-2);
+}
+
+/* 元信息行：标签在上、值在下（与飞牛应用中心一致） */
+.fpkm-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 44px;
+  padding: 20px 0;
+  border-top: 1px solid var(--semi-color-border);
+  border-bottom: 1px solid var(--semi-color-border);
+  margin-bottom: 20px;
+}
+
+.fpkm-detail-meta-item {
+  min-width: 96px;
+  max-width: 240px;
+}
+
+.fpkm-detail-meta-label {
+  font-size: 12.5px;
+  color: var(--semi-color-text-2);
+  margin-bottom: 4px;
+}
+
+.fpkm-detail-meta-value {
+  font-size: 14px;
+  color: var(--semi-color-text-0);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fpkm-detail-section {
+  margin-top: 8px;
+}
+
+/* 应用介绍：保留富文本排版 */
+.fpkm-detail-desc {
+  font-size: 14px;
+  line-height: 1.85;
+  color: var(--semi-color-text-1);
+  word-break: break-word;
+}
+
+.fpkm-detail-desc p {
+  margin: 0 0 10px;
+}
+
+.fpkm-detail-desc strong,
+.fpkm-detail-desc b {
+  color: var(--semi-color-text-0);
+}
+
+.fpkm-detail-desc a {
+  color: #2b6cff;
+}
+
+.fpkm-detail-desc code {
+  background: var(--semi-color-fill-0);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
+.fpkm-detail-desc img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+.fpkm-detail-desc ul,
+.fpkm-detail-desc ol {
+  padding-left: 22px;
+  margin: 0 0 10px;
+}
+
+/* 已安装卡片的图标回退首字母 */
+.fpkm-app-icon-fallback {
+  font-size: 18px;
+  font-weight: 600;
+  color: #2b6cff;
+}
+
+/* 卡片整体可点（进入详情） */
+.fpkm-app-card,
+.fpkm-store-card {
+  cursor: pointer;
+}
+
+/* ---------- 详情页：不显示插入符，但文字仍可选中 ----------
+
+   需求拆解（两者要同时满足）：
+     1. 鼠标划过正文时不出现文本插入符（I 形光标）；
+     2. 标题 / 元信息 / 应用介绍等文字**仍可正常选中复制**。
+
+   关键：这两件事由**不同的 CSS 属性**控制，不能混用：
+     - cursor: default      → 控制鼠标指针形状（去掉 I 形）
+     - user-select: text     → 控制能否选中文字（必须保持可选）
+     - caret-color           → 控制输入插入符的颜色（仅对可编辑元素有意义）
+
+   上一版误用了 user-select: none，把"不显示插入符"做成了"不能选中"，
+   导致文字无法复制。这里改回 user-select: text。
+   ------------------------------------------------------------ */
+
+/* 正文只读：指针用普通箭头，但文字保持可选中 */
+.fpkm-detail,
+.fpkm-detail .semi-typography,
+.fpkm-detail .fpkm-detail-sub,
+.fpkm-detail .fpkm-detail-meta,
+.fpkm-detail .fpkm-detail-meta-label,
+.fpkm-detail .fpkm-detail-meta-value,
+.fpkm-detail .fpkm-detail-desc {
+  cursor: default;
+  user-select: text;
+}
+
+/* 交互元素保持手型光标 */
+.fpkm-detail button,
+.fpkm-detail a,
+.fpkm-detail .semi-button,
+.fpkm-detail [role='button'] {
+  cursor: pointer;
+}
+
+/* 应用介绍里的链接 */
+.fpkm-detail-desc a {
+  cursor: pointer;
+}
+
+/* ---------- 隐藏输入框的闪烁插入符（但保留输入与选择能力） ----------
+
+   搜索框等真实输入控件聚焦时，浏览器会绘制一个闪烁的文本插入符。
+   某些用户不希望看到这个闪烁（视觉干扰），但仍需要能输入与选中文字。
+
+   caret-color: transparent 正是为此设计的属性：
+     - 插入符不可见 → 不再闪烁
+     - 输入、删除、选中、复制、键盘导航全部正常
+   ------------------------------------------------------------ */
+/* 只作用于顶部搜索框（用户反馈的正是这一处）。
+   登录/设置密码的输入框**不隐藏**插入符 —— 那里需要它来提示
+   当前输入位置，隐藏反而会造成困扰。 */
+.fpkm-top-search input,
+.fpkm-top-search .semi-input {
+  caret-color: transparent;
+}
+
+/* ---------- 详情页操作按钮区 ---------- */
+
+/* 与"已安装"卡片一致：操作组在左，危险操作（卸载）单独放右侧，
+   中间留出较大间隔，避免误点。 */
+.fpkm-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.fpkm-detail-actions-main {
+  min-width: 0;
+}
+
+/* 卸载靠右，与操作组拉开距离 */
+.fpkm-detail-actions-danger {
+  margin-left: auto;
+}
+
+/* ---------- 详情页分裂按钮（打开 ▾） ---------- */
+
+/* ---------- 详情页分裂按钮（打开 ▾） ----------
+
+   Semi 的 SplitButtonGroup 渲染结构：
+     .semi-button-split
+       ├─ button.semi-button-first
+       └─ button.semi-button-last      ← 箭头按钮
+
+   三个必须处理的默认样式，否则两半拼不成一个完整椭圆：
+   1. `.semi-button-size-small{height:24px}` 比本文件里的
+      `height:30px` 更"靠后"，会把箭头按钮压回 24px —— 需要用
+      同等或更高的选择器权重覆盖；
+   2. `.semi-button-split .semi-button{margin-right:1px}` 会在两半
+      之间留 1px 缝；
+   3. `.semi-button-split{display:inline-block}` 使两个按钮按基线
+      对齐，箭头按钮会下沉 3px —— 改为 flex 并拉伸对齐。
+   ------------------------------------------------------------ */
+
+.fpkm-split-btn.semi-button-split {
+  display: inline-flex;
+  align-items: stretch;
+}
+
+/* 两半统一高度、去掉默认的 1px 间隙与圆角 */
+.fpkm-split-btn.semi-button-split .semi-button,
+.fpkm-split-btn.semi-button-split .semi-button.semi-button-size-small {
+  height: 30px;
+  margin-right: 0;
+  border-radius: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  /* flex 子项等高，避免任一按钮被内容撑出不同高度 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 主按钮：左侧圆角 */
+.fpkm-split-btn.semi-button-split .semi-button.semi-button-first {
+  border-top-left-radius: 9px;
+  border-bottom-left-radius: 9px;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+/* 箭头按钮：右侧圆角 + 与主按钮之间的分隔线 */
+.fpkm-split-btn.semi-button-split .semi-button.semi-button-last {
+  border-top-right-radius: 9px;
+  border-bottom-right-radius: 9px;
+  min-width: 32px;
+  padding-left: 0;
+  padding-right: 0;
+  border-left: 1px solid rgba(43, 108, 255, 0.22);
+}
+
+/* 箭头按钮内容居中（Semi 默认给 icon-only 加了左右内边距） */
+.fpkm-split-btn.semi-button-split .semi-button.semi-button-last .semi-button-content {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* 下拉菜单：宽度与分裂按钮整体对齐。
+   SplitButtonGroup 的最小宽度 = 主按钮 + 箭头按钮（约 108px），
+   菜单由 portal 渲染，无法继承父宽度，因此固定一个略宽的最小宽度。 */
+.fpkm-split-menu.semi-dropdown-menu,
+.fpkm-split-menu .semi-dropdown-menu {
+  min-width: 112px;
+}
+
+/* 菜单项拉满宽度，文字左对齐（Semi 默认菜单项较窄且居中偏左） */
+.fpkm-split-menu .semi-dropdown-item {
+  display: flex;
+  justify-content: flex-start;
+  padding-left: 14px;
+  padding-right: 14px;
+}
+
+/* 下拉菜单里的"卸载"用危险色 */
+.fpkm-split-btn .semi-dropdown-item.semi-dropdown-item-danger,
+.fpkm-split-btn .semi-dropdown-menu .semi-dropdown-item-danger {
+  color: rgb(var(--semi-red-5));
+}
+
+/* ---------- 应用设置弹窗 ---------- */
+.fpkm-set-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--semi-color-border);
+  border-radius: 10px;
+  margin-bottom: 20px;
+}
+
+.fpkm-set-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.fpkm-set-titlewrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.fpkm-set-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fpkm-set-sub {
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  margin-top: 2px;
+}
+
+.fpkm-set-kind {
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  flex-shrink: 0;
+}
+
+.fpkm-set-body {
+  padding-bottom: 8px;
+}
+
+.fpkm-set-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+  margin: 16px 0 8px;
+}
+
+.fpkm-set-body .semi-radioGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fpkm-set-hint {
+  color: var(--semi-color-text-2);
+  font-size: 12px;
+  margin-left: 6px;
+}
+
+.fpkm-set-tip {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  line-height: 1.7;
+}
+
+.fpkm-set-tip code {
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--semi-color-fill-0);
+  color: var(--semi-color-text-0);
+  word-break: break-all;
+}
+
+/* 访问地址预览：像飞牛那样用浅灰底条 */
+.fpkm-set-preview {
+  padding: 9px 12px;
+  border-radius: 6px;
+  background: var(--semi-color-fill-0);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  color: var(--semi-color-text-0);
+  word-break: break-all;
+}
