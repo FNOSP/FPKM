@@ -1370,6 +1370,32 @@ func (m *Manager) Stop(appname string) error {
 	return nil
 }
 
+// QuickStatus 返回轻量应用状态：只查运行状态、PID 与端口。
+//
+// 为什么不直接用 Status()：Status 会做完整入口探测（读 cmd/main、
+// 判断脚本类型），只为填一个 EntryType 字符串。前端列表每隔几秒
+// 轮询 /api/apps，对每个应用都探测一次，既拖慢响应，又会把探测
+// 过程的日志反复打出来（用户看到"隔几秒打印一条 cmd/main 通过
+// export..."就是这个原因）。
+//
+// EntryType 仅 fpkm status CLI 与详情页需要，走 Status()。
+func (m *Manager) QuickStatus(appname string) (*AppStatus, error) {
+	appDir := m.cfg.AppDir(appname)
+	if _, err := os.Stat(appDir); err != nil {
+		return nil, fmt.Errorf("应用 %s 未安装", appname)
+	}
+
+	env, _ := LoadEnvFile(m.cfg.AppEnvFile(appname))
+	pm := NewProcessManager(m.cfg.AppPidFile(appname), m.cfg.AppLogFile(appname))
+
+	return &AppStatus{
+		Name:    appname,
+		Running: pm.IsRunning(),
+		PID:     pm.GetPID(),
+		Port:    env["TRIM_SERVICE_PORT"],
+	}, nil
+}
+
 // Status 查看应用状态
 func (m *Manager) Status(appname string) (*AppStatus, error) {
 	appDir := m.cfg.AppDir(appname)

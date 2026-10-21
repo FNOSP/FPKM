@@ -106,7 +106,7 @@ func DetectEntryWithEnv(targetDir string, env EnvMap) (*EntryInfo, error) {
 			//   - 应用实际监听端口与 fpkm 公布的访问端口不一致
 			//   - 用户打开页面即 404 / 无法连接
 			if scriptExportsEnvVars(cmdMain) {
-				logger.Info("cmd/main 通过 export 设置环境变量，改为执行脚本以保留这些变量")
+				logger.Debug("cmd/main 通过 export 设置环境变量，改为执行脚本以保留这些变量")
 				return &EntryInfo{
 					Type:    EntryBashScript,
 					Command: "bash",

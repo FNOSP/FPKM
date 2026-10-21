@@ -92,11 +92,12 @@ func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
 		// desc 也可能是未解析的 i18n 占位符（如 ${common.desc}），一并清理
 		v.Desc = cleanPlaceholderText(v.Desc)
 
-		if st, err := s.mgr.Status(info.Name); err == nil {
+		// 列表页用 QuickStatus：不需要 EntryType，避免每次轮询
+		// 都对每个应用做完整入口探测（拖慢响应且反复打日志）。
+		if st, err := s.mgr.QuickStatus(info.Name); err == nil {
 			v.Running = st.Running
 			v.PID = st.PID
 			v.Port = st.Port
-			v.EntryType = st.EntryType
 		}
 
 		env, _ := app.LoadEnvFile(s.cfg.AppEnvFile(info.Name))
