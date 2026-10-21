@@ -165,6 +165,59 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.88 解压时给 shebang 脚本补执行位
+
+#### 现象
+
+Octop（`octop-native`）能安装、但启动即失败：
+
+```
+octop-native 用户不可用，回退以当前身份运行 Octop 服务
+.../target/bin/octop: Permission denied
+Octop process exited early
+```
+
+#### 根因
+
+`target/bin/octop` 权限是 `-rw-r--r--`（无执行位），而**同一个包**里的
+`bin/octop-cli` 是 `-rwxr-xr-x`。同样的解压逻辑、同一个包，权限却不同，
+说明是**打包时漏给了 `bin/octop` 执行位**。
+
+`cmd/main` 用 `"${BIN}"` 直接执行该脚本（不是 `bash "${BIN}"`），
+没有执行位就必然 `Permission denied`。
+
+顺带修掉一个隐患：`os.OpenFile` 的 perm **只对新建文件生效**，
+升级安装时目标已存在，旧权限会被原样保留 —— 即使新版本修正了权限
+也落不了地。
+
+#### 修法
+
+`untar` 解压每个普通文件后：
+
+1. 读前 4 字节判断是否 shebang（`#!`），读完原样写回，不改内容
+2. 显式 `os.Chmod` 到最终权限（修掉升级场景 perm 不生效的问题）
+3. shebang 脚本若原权限无执行位，补上 `0755`
+
+#### 实测
+
+构造一个模仿 Octop 结构的包（`bin/octop` 为 644 的 shebang 脚本，
+`cmd/main` 直接执行它）：
+
+- 修复前：`Permission denied`
+- 修复后：解压出 `-rwxr-xr-x`，启动日志出现该脚本的输出
+  `octop-like launcher running`
+
+新增 2 项测试：shebang 脚本补执行位且内容不被破坏、
+原有 755 的执行位不丢失、普通文本不会被误加执行位。
+
+#### 遗留说明
+
+Octop 还有第二个独立问题：包内 `site-packages/octop.whl` 损坏
+（17.8MB，EOCD 声明中央目录在 17,609,479，但该处字节不是 `PK\x01\x02`），
+导致 `pip install` 失败。这是**安装包本身损坏**，与 fpkm 无关 ——
+需要重新获取完好的包。本机 `packages/Octop-fnos-native-1.0.2b9.fpk`
+也已损坏（gzip `invalid compressed data`）。
+
 ### 0.87 依赖应用（install_dep_apps）展示与自动安装
 
 #### 背景

@@ -124,11 +124,39 @@ func untar(reader io.Reader, destDir string) error {
 			if err != nil {
 				return fmt.Errorf("创建文件失败 %s: %w", target, err)
 			}
+			// 先读几个字节判断是不是 shebang 脚本（#!），
+			// 再原样写回，不改变文件内容。
+			var head [4]byte
+			hn, _ := io.ReadFull(tr, head[:])
+			isScript := hn >= 2 && head[0] == '#' && head[1] == '!'
+			if hn > 0 {
+				if _, werr := f.Write(head[:hn]); werr != nil {
+					f.Close()
+					return fmt.Errorf("写入文件失败 %s: %w", target, werr)
+				}
+			}
 			if _, err := io.Copy(f, tr); err != nil {
 				f.Close()
 				return fmt.Errorf("写入文件失败 %s: %w", target, err)
 			}
 			f.Close()
+
+			// 关键：显式 chmod。
+			//
+			// os.OpenFile 的 perm 只对"新建"文件生效；升级安装时目标已存在，
+			// 旧权限会被原样保留，导致新版本修正过的权限无法落地。
+			//
+			// 另外：部分 .fpk 打包时漏给脚本执行位（真实案例 Octop 的
+			// bin/octop 是 644，而同包的 bin/octop-cli 是 755），fnOS 下能跑
+			// 是因为打包环境权限更宽松。这里对 shebang 脚本补执行位，
+			// 否则启动时报 "Permission denied"。
+			finalMode := fileMode
+			if isScript && finalMode&0111 == 0 {
+				finalMode |= 0755
+			}
+			if err := os.Chmod(target, finalMode); err != nil {
+				return fmt.Errorf("设置文件权限失败 %s: %w", target, err)
+			}
 
 		case tar.TypeSymlink:
 			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
