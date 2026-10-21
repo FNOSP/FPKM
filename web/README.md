@@ -165,6 +165,53 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.86 修复网关应用页面白屏（wol-manager）
+
+#### 现象
+
+访问 `http://192.168.31.18:7666/app/wol-manager/` 白屏。应用进程在跑、
+socket 正常、直连 18080 也能打开页面。
+
+#### 根因：网关剥离了挂载前缀
+
+应用按「本次请求的挂载前缀」生成 HTML 的 `base href`。fpkm 网关的
+Director 把 `/app/wol-manager/` 剥成 `/` 再转发，于是：
+
+```
+应用收到 "/"        → 返回 base href="/"
+静态资源 ./assets/… → 浏览器按 base 解析成 /assets/…
+                     → 打到 fpkm 自己的 SPA → JS 全 404 → 白屏
+```
+
+这与飞牛统一网关的行为不一致 —— 飞牛原样转发 `/app/{appname}/...`，
+由应用自行处理前缀。
+
+#### 兼容性验证（改前逐一确认）
+
+| 应用 | 收到带前缀路径时的行为 |
+| --- | --- |
+| wol-manager | 按请求前缀自适应 base href（本次故障应用） |
+| gately | `ui/config` 明确声明 `url: "/app/gately/"` |
+| fn-deepseek-harness | 自带 `pathRewriteMiddleware` 自己剥前缀 |
+
+三类网关应用全部兼容「保留原始路径」，因此改为**原样转发**。
+
+实测：页面 200（`base href="/app/wol-manager/"`）、
+index.js 271KB / vendor.js 102KB / css 30KB 全部 200 且 MIME 正确。
+
+#### 顺带修复：路由按需注册
+
+`registerAppRoutes()`（全量扫描）只在 fpkm 启动、恢复完自启动应用后
+调用一次。之后用户手动启动的应用**永远拿不到路由**，访问一律 404。
+
+修法：
+
+- `registerAppRoute(name)`：应用启动成功后注册路由
+- `unregisterAppRoute(name)`：停止 / 卸载后摘除路由，
+  避免请求继续打到已死进程
+
+实测：停止后访问 404（路由已摘），再启动后 200（路由重新注册）。
+
 ### 0.85 列表轮询不再触发入口探测
 
 #### 问题

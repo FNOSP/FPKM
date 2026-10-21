@@ -444,14 +444,19 @@ func (g *Gateway) getProxy(route *Route) *httputil.ReverseProxy {
 			return nil
 		},
 		Director: func(req *http.Request) {
-			// 剥离网关前缀
-			// /app/frpc?action=status → /?action=status
-			// /app/frpc/statics/x.js → /statics/x.js
-			strippedPath := strings.TrimPrefix(req.URL.Path, prefix)
-			if strippedPath == "" {
-				strippedPath = "/"
-			}
-			req.URL.Path = strippedPath
+			// 保留原始路径转发，不剥离网关前缀。
+			//
+			// 真实故障（wol-manager 1.7.0）：应用按「本次请求的挂载前缀」
+			// 生成 HTML 的 base href。剥掉前缀后应用看到 "/"，返回
+			// base href="/"，而静态资源是相对路径 ./assets/... ——
+			// 浏览器把基准改成根目录，去请求 /assets/... 打到了 fpkm 自己
+			// 的 SPA，JS 全部 404，页面白屏。
+			//
+			// 与飞牛统一网关的行为保持一致：原样转发 /app/{appname}/...，
+			// 由应用自己处理挂载前缀。实测三类网关应用全部兼容：
+			//   wol-manager      —— 按请求前缀自适应 base href
+			//   gately           —— ui/config 声明 url=/app/gately/
+			//   fn-deepseek-harness —— 自带 pathRewriteMiddleware 剥前缀
 			req.URL.RawPath = ""
 
 			// 设置 URL scheme 和 host（ReverseProxy 必需）

@@ -189,6 +189,9 @@ func (s *Server) handleAppAction(w http.ResponseWriter, r *http.Request) {
 					if aerr := s.autostart.mark(name); aerr != nil {
 						logger.Warn("记录应用自启动失败（不影响运行）: %v", aerr)
 					}
+					// 网关路由按需注册：启动时注册、停止/卸载时移除。
+					// 只靠启动时的全量扫描，手动启动的应用永远 404。
+					s.registerAppRoute(name)
 				}
 			case "stop":
 				opErr = s.mgr.Stop(name)
@@ -197,6 +200,8 @@ func (s *Server) handleAppAction(w http.ResponseWriter, r *http.Request) {
 				if uerr := s.autostart.unmark(name); uerr != nil {
 					logger.Warn("清除应用自启动记录失败: %v", uerr)
 				}
+				// 路由随进程一起摘除，避免请求继续打到已死进程
+				s.unregisterAppRoute(name)
 			case "uninstall":
 				// 服务端按向导规则再校验一次（接口可被直接调用）
 				if verr := validateWizardSubmission(s.cfg.AppDir(name), app.WizardUninstall, wizardValues); verr != nil {
@@ -208,6 +213,7 @@ func (s *Server) handleAppAction(w http.ResponseWriter, r *http.Request) {
 					if uerr := s.autostart.unmark(name); uerr != nil {
 						logger.Warn("清除应用自启动记录失败: %v", uerr)
 					}
+					s.unregisterAppRoute(name)
 				}
 			}
 			if opErr != nil {

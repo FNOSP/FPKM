@@ -84,6 +84,45 @@ func RestoreAutostart(cfg *config.Config, srv *Server) {
 	}()
 }
 
+// registerAppRoute 在应用启动成功后，把它的网关路由注册进内嵌网关。
+//
+// 为什么需要：registerAppRoutes()（全量版）只在 fpkm 启动、恢复完
+// 自启动应用后调用一次。之后用户手动启动的应用永远拿不到路由，
+// 访问 /app/{appname}/ 一律 404（真实案例：wol-manager 手动启动后
+// 页面打不开）。
+//
+// 幂等：AddRoute 对相同 (prefix, socket, protocol) 会跳过。
+func (s *Server) registerAppRoute(name string) {
+	gw := s.Gateway()
+	if gw == nil {
+		return
+	}
+	env, err := app.LoadEnvFile(s.cfg.AppEnvFile(name))
+	if err != nil || env == nil {
+		return
+	}
+	prefix := env["GATEWAY_PREFIX"]
+	if prefix == "" {
+		return
+	}
+	switch {
+	case env["CGI_PATH"] != "":
+		gw.AddRouteCGI(name, prefix, env["CGI_PATH"])
+	case env["SOCKET_PATH"] != "":
+		gw.AddRoute(name, prefix, env["SOCKET_PATH"])
+	}
+}
+
+// unregisterAppRoute 在应用停止 / 卸载后移除网关路由，
+// 避免请求继续打到已死进程上（表现为长时间挂起或 502）。
+func (s *Server) unregisterAppRoute(name string) {
+	gw := s.Gateway()
+	if gw == nil {
+		return
+	}
+	gw.RemoveRoute("/app/" + name)
+}
+
 // registerAppRoutes 把已安装应用的网关路由注册到内嵌网关。
 //
 // 与 cmd/web.go 的启动扫描相同，但这里按需调用：
