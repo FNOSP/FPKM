@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"fpkm/internal/logger"
+	"io"
 	"io/fs"
 	"net"
 	"os"
@@ -222,6 +223,7 @@ func (pm *ProcessManager) startBashScript(entry *EntryInfo, env EnvMap) error {
 
 		// 等待 PID 文件创建（最多 10 分钟）
 		// 某些应用（如 fnchat）需要在启动前创建 venv 并安装 pip 依赖，耗时较长
+		var deadPidSince time.Time
 		for i := 0; i < 6000; i++ {
 			// 1. 先检查候选 PID 文件
 			for _, pidFilePath := range candidatePidFiles {
@@ -233,14 +235,32 @@ func (pm *ProcessManager) startBashScript(entry *EntryInfo, env EnvMap) error {
 			}
 
 			// 2. 通配符匹配 var 目录下的所有 .pid 文件
+			sawPidFile := false
 			matches, _ := filepath.Glob(filepath.Join(pidFile, "*.pid"))
 			for _, match := range matches {
 				// 跳过 fpkm 自己的 PID 文件（app.pid 在 appDir 下，不在 var 下，所以这里不会匹配到）
-				if pid, ok := readPidFromFile(match); ok && isProcessAlive(pid) {
-					pm.writePID(pid)
-					logger.Debug("从脚本 PID 文件读取到 PID: %d (%s)", pid, filepath.Base(match))
-					return nil
+				if pid, ok := readPidFromFile(match); ok {
+					sawPidFile = true
+					if isProcessAlive(pid) {
+						pm.writePID(pid)
+						logger.Debug("从脚本 PID 文件读取到 PID: %d (%s)", pid, filepath.Base(match))
+						return nil
+					}
 				}
+			}
+
+			// PID 文件已写出、但进程已经不在了 —— 说明应用启动后立刻退出
+			// （典型原因：端口被占用 bind 失败、缺少配置）。
+			// 这种情况不能空等 10 分钟然后当作成功，要尽快报错并附日志尾部。
+			if sawPidFile {
+				if deadPidSince.IsZero() {
+					deadPidSince = time.Now()
+				} else if time.Since(deadPidSince) > 3*time.Second {
+					return fmt.Errorf("应用启动后立即退出（PID 文件存在但进程已消失）%s",
+						TailLogHint(pm.logFile, 12))
+				}
+			} else {
+				deadPidSince = time.Time{}
 			}
 
 			time.Sleep(100 * time.Millisecond)
@@ -249,6 +269,56 @@ func (pm *ProcessManager) startBashScript(entry *EntryInfo, env EnvMap) error {
 	}
 
 	return nil
+}
+
+// TailLogHint 读取日志文件末尾若干行，用于把失败原因直接写进错误信息。
+//
+// 为什么需要：应用启动失败时（典型 "bind: address already in use"），
+// 真正原因只写在应用自己的日志里。若上层只报"启动失败"，用户与维护者
+// 都无从判断，只能反复猜测。
+//
+// 只读取文件尾部固定大小的窗口，避免把巨大的日志整份读进内存。
+func TailLogHint(logFile string, n int) string {
+	if logFile == "" || n <= 0 {
+		return ""
+	}
+	f, err := os.Open(logFile)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	const window = 64 << 10 // 64KB 足够覆盖最近若干行
+	st, err := f.Stat()
+	if err != nil || st.Size() == 0 {
+		return ""
+	}
+	offset := int64(0)
+	if st.Size() > window {
+		offset = st.Size() - window
+	}
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return ""
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return ""
+	}
+
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	kept := make([]string, 0, len(lines))
+	for _, l := range lines {
+		if t := strings.TrimSpace(l); t != "" {
+			kept = append(kept, t)
+		}
+	}
+	if len(kept) == 0 {
+		return ""
+	}
+	return "\n应用日志尾部:\n" + strings.Join(kept, "\n")
 }
 
 // readPidFromFile 从文件读取 PID

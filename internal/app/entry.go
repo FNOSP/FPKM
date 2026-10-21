@@ -92,6 +92,29 @@ func DetectEntryWithEnv(targetDir string, env EnvMap) (*EntryInfo, error) {
 	if fileExists(cmdMain) {
 		// 检测是否是完整 bash 脚本（含 case 语句和函数定义）
 		if isFullBashScript(cmdMain) {
+			// 关键：cmd/main 若通过 export 设置启动命令依赖的环境变量，
+			// 绝不能走「提取 CMD 行直接执行」的捷径 —— 脚本不运行，
+			// 所有 export 都会丢失。
+			//
+			// 真实故障（wb2api 1.13.0）：
+			//	export WB2A_LISTEN=$port     # 端口来自安装向导
+			//	export WB2A_API_KEY=$pwd     # 密码来自安装向导
+			//	CMD="${TRIM_APPDEST}/bin/wb2api -config ..."
+			// 提取 CMD 后脚本没跑，这两个变量消失，应用回退到自带
+			// config.json 里写死的端口与示例密钥：
+			//   - 向导设置的端口、密码完全失效（密钥退回 "test_key"）
+			//   - 应用实际监听端口与 fpkm 公布的访问端口不一致
+			//   - 用户打开页面即 404 / 无法连接
+			if scriptExportsEnvVars(cmdMain) {
+				logger.Info("cmd/main 通过 export 设置环境变量，改为执行脚本以保留这些变量")
+				return &EntryInfo{
+					Type:    EntryBashScript,
+					Command: "bash",
+					Args:    []string{cmdMain, "start"},
+					WorkDir: targetDir,
+				}, nil
+			}
+
 			// 尝试从 bash 脚本中提取启动命令（如 CMD= 行）
 			// 这样可以避免执行整个 bash 脚本，直接启动目标进程
 			// 对于多进程应用（CMD 含 & 分隔），会拆分为主进程 + 附加进程
@@ -1154,6 +1177,34 @@ func isFullBashScript(scriptPath string) bool {
 		return false
 	}
 	return looksLikeDispatcherScript(string(data))
+}
+
+// scriptExportsEnvVars 判断 cmd/main 是否用 export 设置了环境变量。
+//
+// 为什么这个判断决定「执行脚本」还是「提取 CMD 行」：
+//
+//	extractCmdFromBashScript 只解析 CMD= 这一行，脚本其余部分不会运行。
+//	于是 `export FOO=$bar` 这类赋值对最终进程完全不可见。
+//	当应用依赖这些变量（端口、密钥、数据目录…）时，进程会带着错误配置
+//	启动 —— 典型表现是「装得上、进程也在，但页面访问不了」。
+//
+// 只认行首的 export（允许缩进），避免把注释或字符串里的 export 误判。
+// 形如 `export FOO`（导出已赋值变量）同样计入，因为值来自脚本内部计算。
+func scriptExportsEnvVars(scriptPath string) bool {
+	data, err := os.ReadFile(scriptPath)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "#") {
+			continue
+		}
+		if strings.HasPrefix(t, "export ") || t == "export" {
+			return true
+		}
+	}
+	return false
 }
 
 // looksLikeDispatcherScript 判断 cmd/main 是否是"分发脚本"：

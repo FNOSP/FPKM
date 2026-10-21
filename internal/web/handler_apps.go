@@ -412,9 +412,28 @@ func describeAccessFor(cfg *config.Config, name, port string, env app.EnvMap, ap
 		if err != nil || p <= 0 {
 			return AccessInfo{Kind: "unknown"}
 		}
+		// 打开路径不能硬编码成 "/"。
+		//
+		// 真实故障（wb2api 1.13.0）：ui/config 声明 url="/panel"，
+		// 应用只在 /panel/ 提供面板，根路径返回 404。若这里写死 "/"，
+		// 用户点"打开"必然看到 404 page not found。
+		//
+		// 取值顺序：env 的 LAUNCH_PATH（启动流程已按 ui/config 同步）
+		// → 直接读 ui/config 的 url → 最后才回退 "/"。
+		accessPath := strings.TrimSpace(env["LAUNCH_PATH"])
+		if accessPath == "" && appDir != "" {
+			if e, ok := app.ReadUIConfigEntry(filepath.Join(appDir, "target"), appDir); ok {
+				if u := strings.TrimSpace(e.URL); strings.HasPrefix(u, "/") {
+					accessPath = u
+				}
+			}
+		}
+		if accessPath == "" {
+			accessPath = "/"
+		}
 		return AccessInfo{
 			Kind:       "port",
-			AccessPath: "/",
+			AccessPath: accessPath,
 			AccessPort: p,
 			Scheme:     "http",
 			LaunchMode: launchMode,

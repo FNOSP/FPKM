@@ -28,3 +28,10 @@ web/public/favicon.ico
 /FnChat/
 /指尖nas-wizard/
 /semi-ui-skills.zip
+
+# 本地测试残留（curl cookie 文件等）
+c.txt
+c*.txt
+
+# Android 移植版是独立分支（branch: fpkm-Android），main 上不跟踪
+/fpkm-Android/

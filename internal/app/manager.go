@@ -680,6 +680,22 @@ func (m *Manager) Start(appname string) error {
 				}
 				SaveEnvFile(m.cfg.AppEnvFile(appname), env)
 			}
+
+			// 端口型应用：记录 ui/config 声明的打开路径（如 /panel）。
+			//
+			// 真实故障（wb2api 1.13.0）：ui/config 写明 url="/panel"，
+			// 但上面清理网关字段时把 LAUNCH_PATH 清空后不再回填，
+			// describeAccessFor 又把端口型路径硬编码成 "/"。用户打开
+			// http://host:port/ 得到 404 —— 真实面板在 /panel/。
+			// 这里以 ui/config 为准回填，让访问地址与实际服务路径一致。
+			wantLaunch := readLaunchPathFromUIConfig(targetDirCheck, appDir)
+			if env["LAUNCH_PATH"] != wantLaunch {
+				if wantLaunch != "" {
+					logger.Info("端口型应用打开路径: %q -> %q (以 ui/config 为准)", env["LAUNCH_PATH"], wantLaunch)
+				}
+				env["LAUNCH_PATH"] = wantLaunch
+				SaveEnvFile(m.cfg.AppEnvFile(appname), env)
+			}
 		} else {
 			wantPrefix := readGatewayPrefixFromUIConfig(targetDirCheck, appDir)
 			if wantPrefix == "" {
@@ -931,6 +947,18 @@ func (m *Manager) Start(appname string) error {
 	pm := NewProcessManager(m.cfg.AppPidFile(appname), m.cfg.AppLogFile(appname))
 	if err := pm.Start(entry, env); err != nil {
 		return fmt.Errorf("启动失败: %w", err)
+	}
+
+	// 启动后存活校验。
+	//
+	// 脚本模式下 cmd/main 用 `&` 后台启动应用、脚本自身 exit 0 就算"成功"，
+	// 但应用子进程可能因端口被占用、配置缺失等原因立刻退出。
+	// 不校验就会出现"界面显示已启动、点开却访问不了页面"的情况
+	// （真实案例：wb2api 因 7863 被占用 bind 失败，任务仍报 success）。
+	// 这里短暂观察，进程不在了就报错，并把应用日志尾部一起带出来。
+	if err := confirmProcessAlive(pm, 2*time.Second); err != nil {
+		return fmt.Errorf("应用 %s 启动失败: %w%s",
+			appname, err, TailLogHint(m.cfg.AppLogFile(appname), 12))
 	}
 
 	port := env["TRIM_SERVICE_PORT"]
@@ -2298,5 +2326,26 @@ func moveAcrossFS(src, dst string) error {
 			return err
 		}
 		return os.Remove(src)
+	}
+}
+
+// confirmProcessAlive 在启动后短暂观察进程是否存活。
+//
+// 取不到 PID 时（应用没写 PID 文件）不做判断 —— 无法判定就不该误报失败，
+// 否则会把原本能跑的应用判成启动失败。
+func confirmProcessAlive(pm *ProcessManager, window time.Duration) error {
+	pid := pm.GetPID()
+	if pid <= 0 {
+		return nil
+	}
+	deadline := time.Now().Add(window)
+	for {
+		if !isProcessAlive(pid) {
+			return fmt.Errorf("进程启动后立即退出 (PID: %d)", pid)
+		}
+		if time.Now().After(deadline) {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }

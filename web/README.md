@@ -165,6 +165,94 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.83 修复 wb2api 类应用「装得上但页面访问不了」
+
+#### 现象
+
+`wb2api-1.13.0-3.fpk` 安装成功、进程也起来了，但点「打开」访问不了页面。
+实测：fpkm 公布 `http://host:7864/`，而应用真实服务在
+`http://host:7899/panel/` —— **端口与路径全错**。
+
+#### 三个叠加缺陷
+
+**① 入口探测绕过了 `cmd/main`（最根本）**
+
+该应用的端口、密钥、数据目录全靠脚本 export：
+
+```bash
+export WB2A_LISTEN=$port      # 端口来自安装向导
+export WB2A_API_KEY=$pwd      # 密码来自安装向导
+CMD="${TRIM_APPDEST}/bin/wb2api -config ${TRIM_PKGVAR}/config.json"
+```
+
+但 `DetectEntryWithEnv` 发现 `bin/wb2api` 存在，就**提取 CMD 行直接执行**，
+脚本体不运行 → 所有 export 丢失：
+
+```
+进程环境实测：port=7864  TRIM_SERVICE_PORT=7864
+             （没有 WB2A_LISTEN，没有 WB2A_API_KEY）
+```
+
+于是应用回退到自带 `config.json` 里写死的 `listen: ":7863"` 与示例密钥
+`test_key` —— 向导设置的端口和密码**完全失效**。
+
+修法：新增 `scriptExportsEnvVars()`。`cmd/main` 只要含 `export`，
+就改为 `bash cmd/main start` 执行脚本，不再走提取捷径。
+
+影响面已扫描 23 个真实 `.fpk`：仅 wb2api 同时具备 `CMD=` 与 `export`，
+其余要么无 `CMD=`（本就执行脚本），要么无 `export`（提取安全）。
+
+**② 端口型应用的打开路径被硬编码成 `/`**
+
+`ui/config` 明确声明了面板路径：
+
+```json
+{"type":"url","port":"${port}","url":"/panel"}
+```
+
+但 `describeAccessFor` 的 port 分支写死 `AccessPath: "/"`，而应用根路径返回
+`404 page not found`（真实面板在 `/panel/`）。
+
+修法：路径取值顺序改为 `env["LAUNCH_PATH"]` → `ui/config` 的 `url` → 最后回退 `"/"`；
+同时 `manager.go` 的端口型分支不再把 `LAUNCH_PATH` 清空后不管，而是按 `ui/config` 回填。
+
+**③ 启动失败却上报成功**
+
+`cmd/main` 用 `&` 后台启动、脚本自身 `exit 0` 就算成功，但子进程可能立刻
+因端口占用等原因退出。实测日志里 `bind: address already in use`，
+而安装任务仍报 `state: success`。
+
+修法：
+
+- 新增 `confirmProcessAlive()`：启动后短暂观察，进程不在了就报错
+- 新增 `TailLogHint()`：把应用日志尾部（限 64KB 窗口）拼进错误信息
+- `startBashScript` 里 PID 文件已出现但进程已消失时，3 秒内失败，
+  不再空等 10 分钟
+
+#### 实测结果（修复后）
+
+用向导指定端口 7900、密码 verifypass123：
+
+```
+.env:  TRIM_SERVICE_PORT=7900  port=7900  pwd=verifypass123  LAUNCH_PATH=/panel
+日志:  listening on :7900 (api_key=ve*********23, 来源 环境变量 WB2A_API_KEY)
+fpkm:  http://<host>:7900/panel   → HTTP 200
+```
+
+修复前：`port` 与密码失效、应用绑 config.json 的 7863、fpkm 公布 7864、
+路径为 `/`，用户必然访问失败。
+
+故障注入验证第 ③ 项（故意写坏 config.json）：
+
+```
+state: failed
+error: 应用 wb2api 启动失败: 进程启动后立即退出 (PID: 843808)
+应用日志尾部: ... load config: parse config: invalid character 't' ...
+```
+
+新增 8 项测试：export 识别、含/不含 export 的入口类型、
+`TailLogHint` 边界、端口型访问路径（ui/config / LAUNCH_PATH / 回退 / 绝对 URL）。
+
 ### 0.82 修复跨文件系统安装丢失 manifest（应用装了但不显示）
 
 #### 现象
