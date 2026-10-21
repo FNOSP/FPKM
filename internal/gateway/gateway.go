@@ -275,7 +275,7 @@ func (g *Gateway) Mount(fallback http.Handler) http.Handler {
 		// 未注册的 /app/* 明确返回 404，而不是回退到前端 SPA。
 		// 否则在 iframe 里打开未启动的应用会显示整个桌面，令人困惑。
 		if strings.HasPrefix(r.URL.Path, "/app/") {
-			logger.Info("[GATEWAY] <-- %s 404 (未注册的应用路由)", r.URL.Path)
+			logger.Debug("[GATEWAY] <-- %s 404 (未注册的应用路由)", r.URL.Path)
 			http.Error(w, "未找到匹配的应用路由: "+r.URL.Path+
 				"\n（应用可能未启动，或尚未注册到网关）", http.StatusNotFound)
 			return
@@ -294,7 +294,7 @@ func (g *Gateway) Mount(fallback http.Handler) http.Handler {
 func (g *Gateway) handleRequest(w http.ResponseWriter, r *http.Request) {
 	matched := g.matchRoute(r.URL.Path)
 	if matched == nil {
-		logger.Info("[GATEWAY] <-- %s 404 (无匹配路由)", r.URL.Path)
+		logger.Debug("[GATEWAY] <-- %s 404 (无匹配路由)", r.URL.Path)
 		http.Error(w, "未找到匹配的应用路由: "+r.URL.Path, http.StatusNotFound)
 		return
 	}
@@ -304,8 +304,8 @@ func (g *Gateway) handleRequest(w http.ResponseWriter, r *http.Request) {
 // serve 处理一个已匹配到路由的请求
 func (g *Gateway) serve(w http.ResponseWriter, r *http.Request, matched *Route) {
 	start := time.Now()
-	logger.Info("[GATEWAY] --> %s %s (from %s)", r.Method, r.URL.Path, r.RemoteAddr)
-	logger.Info("[GATEWAY] 匹配路由: %s -> %s (socket: %s, protocol: %s)", matched.Prefix, matched.AppName, matched.Socket, matched.Protocol)
+	logger.Debug("[GATEWAY] --> %s %s (from %s)", r.Method, r.URL.Path, r.RemoteAddr)
+	logger.Debug("[GATEWAY] 匹配路由: %s -> %s (socket: %s, protocol: %s)", matched.Prefix, matched.AppName, matched.Socket, matched.Protocol)
 
 	// 登录校验（与飞牛一致：网关 / CGI 应用必须登录后才能访问）。
 	//
@@ -329,9 +329,9 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request, matched *Route) 
 
 	// CGI 路由：直接执行 CGI 二进制（不需要 socket 检查）
 	if matched.Protocol == "cgi" {
-		logger.Info("[GATEWAY] CGI 执行: %s (binary: %s)", r.URL.Path, matched.Socket)
+		logger.Debug("[GATEWAY] CGI 执行: %s (binary: %s)", r.URL.Path, matched.Socket)
 		g.proxyCGI(w, r, matched)
-		logger.Info("[GATEWAY] <-- CGI 完成 (%.1fms)", float64(time.Since(start).Microseconds())/1000)
+		logger.Debug("[GATEWAY] <-- CGI 完成 (%.1fms)", float64(time.Since(start).Microseconds())/1000)
 		return
 	}
 
@@ -355,26 +355,26 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request, matched *Route) 
 
 	// WebSocket 升级支持（单独处理）
 	if isWebSocketRequest(r) {
-		logger.Info("[GATEWAY] WebSocket 升级: %s", r.URL.Path)
+		logger.Debug("[GATEWAY] WebSocket 升级: %s", r.URL.Path)
 		g.proxyWebSocket(w, r, matched)
-		logger.Info("[GATEWAY] <-- WebSocket 完成 (%.1fms)", float64(time.Since(start).Microseconds())/1000)
+		logger.Debug("[GATEWAY] <-- WebSocket 完成 (%.1fms)", float64(time.Since(start).Microseconds())/1000)
 		return
 	}
 
 	// FastCGI 路由
 	if matched.Protocol == "fastcgi" {
-		logger.Info("[GATEWAY] FastCGI 转发: %s", r.URL.Path)
+		logger.Debug("[GATEWAY] FastCGI 转发: %s", r.URL.Path)
 		g.proxyFastCGI(w, r, matched)
-		logger.Info("[GATEWAY] <-- FastCGI 完成 (%.1fms)", float64(time.Since(start).Microseconds())/1000)
+		logger.Debug("[GATEWAY] <-- FastCGI 完成 (%.1fms)", float64(time.Since(start).Microseconds())/1000)
 		return
 	}
 
 	// HTTP 请求使用 ReverseProxy 转发
 	// ReverseProxy 正确处理了 HTTP 协议（Content-Length、chunked、keep-alive），
 	// 连接管理（连接池），错误处理和响应流式传输
-	logger.Info("[GATEWAY] HTTP 转发: %s -> %s (strip prefix: %s)", r.URL.Path, matched.Socket, matched.Prefix)
+	logger.Debug("[GATEWAY] HTTP 转发: %s -> %s (strip prefix: %s)", r.URL.Path, matched.Socket, matched.Prefix)
 	g.proxyHTTP(w, r, matched)
-	logger.Info("[GATEWAY] <-- HTTP 完成 (%.1fms)", float64(time.Since(start).Microseconds())/1000)
+	logger.Debug("[GATEWAY] <-- HTTP 完成 (%.1fms)", float64(time.Since(start).Microseconds())/1000)
 }
 
 // getProxy 获取或创建 route 的 ReverseProxy
@@ -527,7 +527,7 @@ type bufferingTransport struct {
 
 // RoundTrip 实现 http.RoundTripper 接口
 func (t *bufferingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	logger.Info("[BUFFER] 开始转发: %s %s", req.Method, req.URL.Path)
+	logger.Debug("[BUFFER] 开始转发: %s %s", req.Method, req.URL.Path)
 
 	resp, err := t.base.RoundTrip(req)
 	if err != nil {
@@ -535,10 +535,10 @@ func (t *bufferingTransport) RoundTrip(req *http.Request) (*http.Response, error
 		return nil, err
 	}
 
-	logger.Info("[BUFFER] 收到响应头: status=%d, ContentLength=%d, TransferEncoding=%v",
+	logger.Debug("[BUFFER] 收到响应头: status=%d, ContentLength=%d, TransferEncoding=%v",
 		resp.StatusCode, resp.ContentLength, resp.TransferEncoding)
 	for k, v := range resp.Header {
-		logger.Info("[BUFFER]   %s: %s", k, strings.Join(v, ", "))
+		logger.Debug("[BUFFER]   %s: %s", k, strings.Join(v, ", "))
 	}
 
 	// 检查是否有明确的响应长度标识
@@ -557,11 +557,11 @@ func (t *bufferingTransport) RoundTrip(req *http.Request) (*http.Response, error
 		} else if isSSE {
 			mode = "sse-stream"
 		}
-		logger.Info("[BUFFER] 流式转发（%s）: %s", mode, req.URL.Path)
+		logger.Debug("[BUFFER] 流式转发（%s）: %s", mode, req.URL.Path)
 		return resp, nil
 	}
 
-	logger.Info("[BUFFER] 无 Content-Length 且非 chunked，启用缓冲模式: %s", req.URL.Path)
+	logger.Debug("[BUFFER] 无 Content-Length 且非 chunked，启用缓冲模式: %s", req.URL.Path)
 
 	// 没有长度标识 → 使用空闲超时 reader 包装响应体
 	idleReader := &idleTimeoutReader{
@@ -579,7 +579,7 @@ func (t *bufferingTransport) RoundTrip(req *http.Request) (*http.Response, error
 		return nil, fmt.Errorf("缓冲响应体失败: %w", err)
 	}
 
-	logger.Info("[BUFFER] 读取完成: %d 字节 (idle_timeout=%v)", len(body), err == errIdleTimeout)
+	logger.Debug("[BUFFER] 读取完成: %d 字节 (idle_timeout=%v)", len(body), err == errIdleTimeout)
 
 	// 检查是否超过缓冲上限
 	if int64(len(body)) > t.bufferMax {
@@ -587,7 +587,7 @@ func (t *bufferingTransport) RoundTrip(req *http.Request) (*http.Response, error
 	}
 
 	if err == errIdleTimeout {
-		logger.Info("[BUFFER] 空闲超时触发，认为响应已结束: %d 字节", len(body))
+		logger.Debug("[BUFFER] 空闲超时触发，认为响应已结束: %d 字节", len(body))
 	}
 
 	// 设置 Content-Length
@@ -597,7 +597,7 @@ func (t *bufferingTransport) RoundTrip(req *http.Request) (*http.Response, error
 	// 清除 Transfer-Encoding（如果有的话），因为我们有 Content-Length 了
 	resp.TransferEncoding = nil
 
-	logger.Info("[BUFFER] 缓冲完成，补全 Content-Length: %d 字节 -> %s", len(body), req.URL.Path)
+	logger.Debug("[BUFFER] 缓冲完成，补全 Content-Length: %d 字节 -> %s", len(body), req.URL.Path)
 
 	return resp, nil
 }
@@ -624,7 +624,7 @@ func (r *idleTimeoutReader) Read(p []byte) (int, error) {
 	timeout := r.idleTimeout
 	if r.firstRead {
 		timeout = 5 * time.Second
-		logger.Info("[IDLE] 首次读取，超时: %v (path: %s)", timeout, r.path)
+		logger.Debug("[IDLE] 首次读取，超时: %v (path: %s)", timeout, r.path)
 		r.firstRead = false
 	}
 
@@ -641,13 +641,13 @@ func (r *idleTimeoutReader) Read(p []byte) (int, error) {
 	select {
 	case res := <-ch:
 		if res.err != nil && res.err != io.EOF {
-			logger.Info("[IDLE] 读取: %d 字节, err=%v (path: %s)", res.n, res.err, r.path)
+			logger.Debug("[IDLE] 读取: %d 字节, err=%v (path: %s)", res.n, res.err, r.path)
 		} else if res.n > 0 {
-			logger.Info("[IDLE] 读取: %d 字节 (path: %s)", res.n, r.path)
+			logger.Debug("[IDLE] 读取: %d 字节 (path: %s)", res.n, r.path)
 		}
 		return res.n, res.err
 	case <-time.After(timeout):
-		logger.Info("[IDLE] 空闲超时 %v，认为响应结束 (path: %s)", timeout, r.path)
+		logger.Debug("[IDLE] 空闲超时 %v，认为响应结束 (path: %s)", timeout, r.path)
 		// 空闲超时：关闭底层 reader，让 goroutine 退出
 		r.closed = true
 		r.reader.Close()
@@ -799,7 +799,7 @@ func (g *Gateway) proxyCGI(w http.ResponseWriter, r *http.Request, route *Route)
 		// 打印关键环境变量用于调试
 		for _, e := range cgiEnv {
 			if strings.HasPrefix(e, "TS_SOCKET=") || strings.HasPrefix(e, "CGI_PATH=") || strings.HasPrefix(e, "GATEWAY_PREFIX=") {
-				logger.Info("[CGI] env: %s", e)
+				logger.Debug("[CGI] env: %s", e)
 			}
 		}
 		logger.Debug("[CGI] 从 env 文件加载 %d 个环境变量", len(cgiEnv))
@@ -852,7 +852,7 @@ func (g *Gateway) proxyCGI(w http.ResponseWriter, r *http.Request, route *Route)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	logger.Info("[CGI] 执行: %s (env: %d 项)", cgiBinary, len(cgiEnv))
+	logger.Debug("[CGI] 执行: %s (env: %d 项)", cgiBinary, len(cgiEnv))
 
 	if err := cmd.Run(); err != nil {
 		logger.Error("[CGI] 执行失败: %v", err)
@@ -940,7 +940,7 @@ func (g *Gateway) proxyCGI(w http.ResponseWriter, r *http.Request, route *Route)
 		w.Header().Set(key, val)
 	}
 
-	logger.Info("[CGI] 响应: %d, body=%d 字节", statusCode, len(body))
+	logger.Debug("[CGI] 响应: %d, body=%d 字节", statusCode, len(body))
 	w.WriteHeader(statusCode)
 	w.Write(body)
 }
