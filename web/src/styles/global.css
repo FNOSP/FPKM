@@ -1134,6 +1134,63 @@ body {
   margin-top: 8px;
 }
 
+/* 依赖的应用：运行时程序卡片（图标 + 名称 + 分类 + 安装/卸载） */
+.fpkm-dep-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.fpkm-dep-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 260px;
+  max-width: 360px;
+  padding: 12px 14px;
+  border: 1px solid var(--semi-color-border);
+  border-radius: 10px;
+  background: var(--semi-color-bg-1);
+}
+
+.fpkm-dep-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex: 0 0 auto;
+  background: var(--semi-color-fill-0);
+}
+
+.fpkm-dep-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fpkm-dep-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fpkm-dep-meta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fpkm-dep-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+}
+
 /* 应用介绍：保留富文本排版 */
 .fpkm-detail-desc {
   font-size: 14px;

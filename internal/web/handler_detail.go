@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"os"
 	"strings"
 
 	"fpkm/internal/app"
@@ -30,6 +31,11 @@ type AppDetail struct {
 	Icon        string  `json:"icon"`
 
 	// 本地状态
+	// Dependencies 是 manifest 的 install_dep_apps 解析结果
+	// （node / python / bun 等运行时依赖）。
+	// 只有本地能读到 manifest 时才有值：已安装，或包已下载缓存。
+	Dependencies []DepApp `json:"dependencies,omitempty"`
+
 	Installed        bool       `json:"installed"`
 	InstalledVersion string     `json:"installedVersion"`
 	UpdateAvailable  bool       `json:"updateAvailable"`
@@ -80,6 +86,7 @@ func (s *Server) detailForInstalled(w http.ResponseWriter, name string) {
 		writeJSONError(w, http.StatusNotFound, "应用未安装或 manifest 缺失: "+name)
 		return
 	}
+	deps := splitDepApps(manifest.InstallDepApps)
 
 	detail := AppDetail{
 		Name:             name,
@@ -90,6 +97,7 @@ func (s *Server) detailForInstalled(w http.ResponseWriter, name string) {
 		Platform:         manifest.Platform,
 		Installed:        true,
 		InstalledVersion: manifest.Version,
+		Dependencies:     s.resolveDepApps(deps),
 		InstallPath:      s.cfg.AppDir(name),
 	}
 
@@ -176,6 +184,17 @@ func (s *Server) detailForStore(w http.ResponseWriter, storeID string) {
 		Repo:        a.Repo,
 		SourceName:  a.SourceName,
 		Icon:        a.Icon,
+	}
+
+	// 未安装时若本地已缓存该包，提前展示依赖（安装前就知道要装哪些运行时）。
+	// manifest 位于 gzip tar 内靠后位置，无法只取一小段，所以只在已缓存时读取，
+	// 避免为了看依赖而下载整个包。
+	if _, statErr := os.Stat(s.cfg.AppManifestFile(appKey)); statErr != nil {
+		if pkg := s.cachedPackageFor(appKey); pkg != "" {
+			if deps := depAppsForPackage(pkg); len(deps) > 0 {
+				detail.Dependencies = s.resolveDepApps(deps)
+			}
+		}
 	}
 
 	// 合并本地已安装状态

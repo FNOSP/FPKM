@@ -113,6 +113,21 @@ export interface MetaInfo {
 }
 
 /** 应用详情（已安装应用与商店条目共用） */
+/** 依赖应用（manifest 的 install_dep_apps，如 python312 / nodejs_v24 / bunjs） */
+export interface DepApp {
+  appname: string;
+  name: string;
+  version: string;
+  category: string;
+  icon: string;
+  desc?: string;
+  installed: boolean;
+  running: boolean;
+  storeId?: string;
+  /** 应用源里能否找到（否则只能提示手动安装） */
+  available: boolean;
+}
+
 export interface AppDetail {
   name: string;
   displayName: string;
@@ -142,6 +157,8 @@ export interface AppDetail {
   access: AccessInfo;
 
   storeId?: string;
+  /** 依赖的运行时程序；仅本地能读到 manifest 时有值 */
+  dependencies?: DepApp[] | null;
 }
 
 export interface LogLine {

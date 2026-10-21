@@ -132,6 +132,8 @@ export default function AppDetailPage({
 
   const accessURL = buildAccessURL(detail.access, publicHost, publicScheme);
   const tags = detail.tags ?? [];
+  // 依赖的运行时程序（manifest 的 install_dep_apps）
+  const deps = detail.dependencies ?? [];
 
   /** 元信息行（开发者/发布者/下载数/大小/安装位置/当前版本） */
   const metaItems = [
@@ -364,6 +366,48 @@ export default function AppDetailPage({
           </div>
         ) : null}
       </div>
+
+      {/* 依赖的应用：manifest 的 install_dep_apps（node / python / bun 等运行时） */}
+      {deps.length > 0 ? (
+        <div className="fpkm-detail-section">
+          <Title heading={6} style={{ marginBottom: 12 }}>
+            依赖的应用
+          </Title>
+          <div className="fpkm-dep-list">
+            {deps.map((d) => (
+              <div className="fpkm-dep-card" key={d.appname}>
+                <img className="fpkm-dep-icon" src={iconURL(d.appname)} alt={d.name} loading="lazy" />
+                <div className="fpkm-dep-main">
+                  <div className="fpkm-dep-name">{d.name}</div>
+                  <div className="fpkm-dep-meta">
+                    {d.category || '运行时'}
+                    {d.version ? ` · v${d.version}` : ''}
+                  </div>
+                </div>
+                {d.installed ? (
+                  <Button size="small" theme="borderless" onClick={() => onAction(d.appname, 'uninstall')}>
+                    卸载
+                  </Button>
+                ) : d.available && d.storeId ? (
+                  <Button
+                    size="small"
+                    theme="light"
+                    type="primary"
+                    onClick={() => onInstall(d.storeId as string)}
+                  >
+                    安装
+                  </Button>
+                ) : (
+                  <Tag size="small" color="grey">
+                    未找到
+                  </Tag>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="fpkm-dep-hint">这些程序会在安装时自动准备，无需手动处理。</div>
+        </div>
+      ) : null}
     </div>
   );
 }

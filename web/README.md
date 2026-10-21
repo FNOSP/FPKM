@@ -165,6 +165,75 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.87 依赖应用（install_dep_apps）展示与自动安装
+
+#### 背景
+
+部分 `.fpk` 应用依赖独立分发的运行时程序，manifest 里用
+`install_dep_apps` 声明（逗号分隔的应用名）：
+
+```
+install_dep_apps = python312
+install_dep_apps = nodejs_v24,bunjs
+```
+
+这些运行时在飞牛商店里本身就是应用（`python312`、`nodejs_v24`、`bunjs`…）。
+缺依赖的应用通常**启动即失败**（找不到 python3 / node），用户看到的是
+"装好了却用不了"。飞牛原版应用中心会连带安装依赖。
+
+#### 展示：详情页「依赖的应用」
+
+`/api/detail` 的 `AppDetail` 新增 `dependencies` 字段：
+
+```json
+{"appname":"python312","name":"Python 3.12","version":"3.12.13",
+ "category":"开发","installed":true,"available":true,"storeId":"python312"}
+```
+
+详情页在「应用介绍」下方渲染依赖卡片：图标 + 名称 + 分类/版本 +
+安装状态按钮（已安装显示「卸载」，未安装且源里有则显示「安装」，
+源里找不到显示「未找到」）。
+
+**依赖信息来源的取舍**：manifest 在 gzip tar 内靠后（`app.tgz` 之后），
+无法只取一小段。实测 23MB 的包要读完整包才能拿到 manifest，
+所以**只在本地能读到 manifest 时才展示**：
+
+- 应用已安装 → 读本地 manifest
+- 应用未安装但包已缓存（`data/packages/`）→ 读缓存包
+
+避免"为了看依赖而下载几百 MB"。
+
+#### 安装：自动补齐依赖
+
+`startInstallTask` 在安装主应用前调用 `ensureDependencies()`：
+
+- 已安装的依赖跳过（不重装、不动版本）
+- 应用源里找不到的依赖给出明确警告，**不阻断**主应用安装
+  （部分依赖可能由用户手动提供）
+- 递归处理依赖的依赖，深度上限 `maxDepDepth = 5`，防止环状 manifest
+- 下载复用商店缓存，安装失败只告警不中断
+
+任务日志会逐条说明，例如：
+
+```
+该应用依赖 1 个程序，正在检查: python312
+安装依赖 Python 3.12 v3.12.13…
+依赖 Python 3.12 安装完成
+```
+
+#### 实测
+
+构造一个 `install_dep_apps = python312` 的测试包：
+
+- 安装后 `total: 2` —— `deptest` 与 `python312` 都在，依赖自动装好
+- `/api/detail?app=deptest` 返回
+  `python312 | Python 3.12 | v=3.12.13 | cat=开发 | installed=true`
+- 浏览器验证详情页渲染出「依赖的应用」卡片，
+  名称/分类/版本/「卸载」按钮均正确
+
+新增 5 项测试：依赖串解析（逗号/分号/空格/去重）、分类提取、
+缓存包读取、未安装且源中缺失、已安装依赖识别。
+
 ### 0.86 修复网关应用页面白屏（wol-manager）
 
 #### 现象

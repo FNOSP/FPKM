@@ -205,6 +205,17 @@ func (s *Server) startInstallTask(pkgPath, originalName string, set map[string]s
 			return
 		}
 
+		// 安装前先把 manifest 声明的依赖应用装好。
+		//
+		// 缺依赖的应用通常启动即失败（找不到 python3 / node），
+		// 用户看到的是"装好了却用不了"。飞牛原版应用中心会连带安装
+		// 依赖，这里对齐该行为。升级时同样补齐，避免旧安装缺依赖。
+		if deps := splitDepApps(info.InstallDepApps); len(deps) > 0 {
+			task.append(LogLevel("info"),
+				fmt.Sprintf("该应用依赖 %d 个程序，正在检查: %s", len(deps), strings.Join(deps, ", ")))
+			s.ensureDependencies(task, deps, 0)
+		}
+
 		alreadyInstalled := false
 		if _, statErr := os.Stat(s.cfg.AppManifestFile(info.Appname)); statErr == nil {
 			alreadyInstalled = true

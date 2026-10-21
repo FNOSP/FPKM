@@ -26,6 +26,9 @@ type PackageInfo struct {
 	ServicePort   string `json:"servicePort,omitempty"`
 	ServiceSocket string `json:"serviceSocket,omitempty"`
 	InstallType   string `json:"installType,omitempty"`
+	// InstallDepApps 是 manifest 声明的依赖应用（逗号分隔的应用名，
+	// 如 python312,nodejs_v24）。安装前需要先把它们装好。
+	InstallDepApps string `json:"installDepApps,omitempty"`
 
 	// HasIcon 表示包内是否存在 ICON.PNG / ICON_256.PNG
 	HasIcon bool `json:"hasIcon"`
@@ -107,6 +110,8 @@ func InspectPackage(fpkPath string, withChecksum bool) (*PackageInfo, error) {
 		ServicePort:   m.ServicePort,
 		ServiceSocket: m.ServiceSocket,
 		InstallType:   m.InstallType,
+
+		InstallDepApps: m.InstallDepApps,
 	}
 
 	if pkg.DisplayName == "" {
