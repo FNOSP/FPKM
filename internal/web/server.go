@@ -461,8 +461,9 @@ func writeJSONError(w http.ResponseWriter, code int, msg string) {
 
 // version/token 生成辅助
 
-// Version 前端资源版本标识（构建期可覆盖）
-var Version = "1.0.0-web"
+// Version 对外报告的版本号（构建期通过 -ldflags 注入，与 cmd.version 保持一致）。
+// 默认 dev 便于区分本地开发构建。
+var Version = "dev"
 
 // RandomToken 生成随机访问令牌
 func RandomToken(n int) (string, error) {

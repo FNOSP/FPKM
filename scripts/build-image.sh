@@ -17,7 +17,7 @@ cd "$ROOT"
 
 USER_NAME="qilinzhu"
 IMAGE="fpkm"
-VERSION="${VERSION:-1.0.1}"
+VERSION="${VERSION:-1.0.2}"
 PUSH=0
 
 for arg in "$@"; do

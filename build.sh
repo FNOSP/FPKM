@@ -35,7 +35,7 @@ if [ ! -f internal/web/dist/index.html ]; then
 fi
 
 echo "==> [3/3] 编译 Go 二进制 ($TARGET)"
-LDFLAGS="-s -w -X 'fpkm/cmd.version=${VERSION}' -X 'fpkm/cmd.buildTime=${BUILD_TIME}'"
+LDFLAGS="-s -w -X 'fpkm/cmd.version=${VERSION}' -X 'fpkm/cmd.buildTime=${BUILD_TIME}' -X 'fpkm/internal/web.Version=${VERSION}'"
 echo "==> 版本: ${VERSION}"
 case "$TARGET" in
   native)
