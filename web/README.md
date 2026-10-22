@@ -165,6 +165,42 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.89 合并 FPKM-v1.0.2.3（版本 1.0.3）
+
+从 `dist/待合并代码/FPKM-main/FPKM-v1.0.2.3` 合并。该版本以本项目 1.0.2
+为基线，逐文件比对确认既有的依赖应用、网关前缀、执行位、日志降噪等改动
+全部保留。
+
+#### 新增能力
+
+| 能力 | 说明 |
+| --- | --- |
+| 应用日志查看 | `/api/apps/{name}/log`（GET）与 `/api/logs`；前端新增「FPKM 日志」「应用日志」两页，支持文件列表、关键词过滤、尾部读取上限、复制/下载、自动刷新 |
+| 日志可读性 | 日志文件按日切分 `fpkm-YYYY-MM-DD.log`；应用子进程输出经时间戳写入器落盘，每行带发生时间；前端按宿主时区偏移换算到访问者本地时区 |
+| 内置应用源 | 源定义编译进二进制，开箱可用；可改名/改地址/停用但不能删除；`sources.json` 损坏时退化为内置源 |
+| 架构过滤 | 列表与详情页统一 `archUsable` 口径，隐藏不匹配条目并给出原因 |
+| 运行时预检 | 启动前探测 `cmd/main` 依赖的外部命令（python3 / node 等），缺失时明确报错 |
+| shell 回退 | `bash` 缺失时回退 `sh`（Android 等精简环境） |
+| 网络适配 | 新增 `internal/netadapt`：`FPKM_DNS` / `FPKM_HOSTS` 注入；Linux/Windows 默认注入公共 DNS 并在首次解析时探测可用者；`FPKM_DNS_AUTO=0` 关闭 |
+| 数据目录 | 支持 `FPKM_DATA_DIR` 显式指定（优先级最高） |
+| 低内存构建 | `web/build-esbuild.mjs` 用 esbuild 替代 vite build |
+| 响应式 | 新增 `useViewport`，窄屏适配 |
+
+#### 修复
+
+- `entry.go`：`parseCmdMain` 解析失败时回退为直接执行脚本
+  （如 cloud-lottery 有 case 分发但无函数定义，此前会解析失败）
+- `readDiskStats` 按 `//go:build` 拆分到 platform 文件，Windows 可编译测试
+
+#### 验证
+
+- `go test` 全部通过（含新增 `internal/logger`、`internal/netadapt`、
+  `applog`、`arch_visibility`、`catalog_builtin`、`prereq`、`shell`、`logwriter` 测试）
+- 前端 `tsc --noEmit` 通过、`build-web.sh` 构建成功
+- 冒烟：`/api/logs` 返回按日切分的日志文件；
+  浏览器验证「FPKM 日志」页正常渲染（文件列表 + 时间戳 + 时区说明）、
+  「应用日志」页可打开、无 JS 错误
+
 ### 0.88 解压时给 shebang 脚本补执行位
 
 #### 现象
