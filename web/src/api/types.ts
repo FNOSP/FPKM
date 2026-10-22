@@ -27,6 +27,8 @@ export interface AppView {
   platform: string;
   dir: string;
   hasUI: boolean;
+  /** 运行时依赖型应用（python/node/bun 等）：无界面，桌面与任务栏不显示 */
+  runtimeDep?: boolean;
   isDocker: boolean;
 
   running: boolean;

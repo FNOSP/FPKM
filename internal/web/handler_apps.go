@@ -25,6 +25,9 @@ type AppView struct {
 	Dir         string `json:"dir"`
 	HasUI       bool   `json:"hasUI"`
 	IsDocker    bool   `json:"isDocker"`
+	// RuntimeDep 运行时依赖型应用（python/node/bun 等）：
+	// 只提供解释器，没有可打开的界面，桌面与任务栏不显示其图标。
+	RuntimeDep bool `json:"runtimeDep"`
 
 	Running   bool   `json:"running"`
 	PID       int    `json:"pid,omitempty"`
@@ -74,6 +77,20 @@ func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 收集「被其他应用依赖」的运行时应用名（manifest 的 install_dep_apps）。
+	//
+	// python312 / nodejs_v24 / bunjs 这类应用只提供解释器，没有可打开的
+	// 界面。桌面与任务栏若显示它们，用户点开只会得到空白，
+	// 因此标记为 RuntimeDep 让前端跳过（商店「已安装」列表仍可见，便于管理）。
+	depNames := map[string]bool{}
+	for _, info := range infos {
+		if m, err := fpk.ParseManifest(s.cfg.AppManifestFile(info.Name)); err == nil {
+			for _, d := range splitDepApps(m.InstallDepApps) {
+				depNames[d] = true
+			}
+		}
+	}
+
 	views := make([]AppView, 0, len(infos))
 	for _, info := range infos {
 		v := AppView{
@@ -103,6 +120,12 @@ func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
 		env, _ := app.LoadEnvFile(s.cfg.AppEnvFile(info.Name))
 		v.Access = describeAccessFor(s.cfg, info.Name, v.Port, env, s.cfg.AppDir(info.Name))
 		v.Kind = v.Access.Kind
+
+		// 运行时依赖判定：
+		//   1) 被其他应用的 install_dep_apps 引用；或
+		//   2) 自身既没有 ui/config，也没有任何可用接入方式（纯 CLI 运行时）。
+		// 两种情况都不该在桌面/任务栏出现图标。
+		v.RuntimeDep = isRuntimeDepApp(info.Name, depNames, s.cfg.AppDir(info.Name))
 
 		// 从商店索引匹配远程图标与条目 ID，供前端作兜底显示与"更新"入口
 		if remote, ok := remoteByApp[info.Name]; ok {
@@ -597,4 +620,37 @@ func port0(env app.EnvMap) string {
 		}
 	}
 	return ""
+}
+
+// isRuntimeDepApp 判断应用是否属于「运行时依赖」型（只提供解释器，无界面）。
+//
+// 判据（满足任一）：
+//  1. 没有 ui/config —— fpkm 无法据此得出打开方式，图标点开只会空白。
+//     生产环境实测：所有带界面的应用都有 ui/config（wb2api / wol-manager /
+//     octop-native / fn-deepseek-harness …），而 python312 / nodejs_v22 /
+//     nodejs_v24 都没有。
+//  2. 被其他应用的 install_dep_apps 引用（即使它自带界面，本质仍是运行时）。
+//
+// 这类应用不该出现在桌面与任务栏；商店「已安装」列表仍可见，便于管理。
+func isRuntimeDepApp(name string, depNames map[string]bool, appDir string) bool {
+	if depNames[name] {
+		return true
+	}
+	return !hasUIConfig(appDir)
+}
+
+// hasUIConfig 判断应用是否带有可打开的界面配置（ui/config）。
+//
+// 没有 ui/config 的应用（python312 / nodejs_v24 等运行时）即使被启动，
+// 也没有页面可展示，不应出现在桌面与任务栏。
+func hasUIConfig(appDir string) bool {
+	for _, p := range []string{
+		filepath.Join(appDir, "target", "ui", "config"),
+		filepath.Join(appDir, "ui", "config"),
+	} {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
 }

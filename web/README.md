@@ -165,6 +165,50 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.91 任务栏/桌面隐藏运行时依赖图标
+
+#### 问题
+
+安装 `python312` / `nodejs_v22` / `nodejs_v24` 这类运行时后，它们的图标会
+出现在任务栏与桌面上，点开却是空白 —— 它们只提供解释器，没有可打开的界面。
+
+#### 判据
+
+`AppView` 新增 `runtimeDep` 字段，满足任一即判定为运行时依赖：
+
+1. **没有 `ui/config`** —— fpkm 无法据此得出打开方式。
+   实测生产环境：所有带界面的应用都有 `ui/config`
+   （wb2api / wol-manager / octop-native / fn-deepseek-harness / gately …），
+   而 python312 / nodejs_v22 / nodejs_v24 都没有。
+2. **被其他应用的 `install_dep_apps` 引用** —— 即使它自带界面，本质仍是运行时。
+
+早期尝试过「`desktop_uidir` 为空」作判据，但 `ParseManifest` 会把空的
+`desktop_uidir` 默认填成 `ui`，该判据恒不成立，已放弃。
+
+#### 前端
+
+`Desktop.tsx` 构建图标列表时跳过 `runtimeDep` 的应用 —— 任务栏（Dock）
+与桌面图标共用同一份列表，因此一处过滤两边生效。
+商店「已安装」列表仍照常显示，便于管理/卸载。
+
+#### 实测
+
+隔离环境放入 python312 / nodejs_v24 / wb2api / wol-manager：
+
+```
+/api/apps →  python312   runtimeDep=true
+              nodejs_v24  runtimeDep=true
+              wb2api      runtimeDep=false
+              wol-manager runtimeDep=false
+
+任务栏图标: ["应用商店", "workbuddy2api", "网络唤醒"]   ← 无 Python / Node
+桌面图标:   ["应用商店"]
+JS errors: 0
+```
+
+新增 2 项测试：运行时依赖判定（被依赖 / 无 ui-config / 有界面 / 有界面且被依赖）、
+`hasUIConfig` 对 `target/ui/config` 与 `app/ui/config` 两种落点的识别。
+
 ### 0.90 修复压缩包被误当脚本改写（应用装得上却起不来）
 
 #### 现象

@@ -166,6 +166,10 @@ export default function Desktop({
   const allIcons: DesktopIcon[] = useMemo(() => {
     const list: DesktopIcon[] = [STORE_ICON];
     for (const a of apps) {
+      // 运行时依赖（python312 / nodejs_v24 / bunjs 等）只提供解释器，
+      // 没有可打开的界面。放进桌面或任务栏只会得到一个点开空白的图标，
+      // 因此直接跳过；它们仍在商店「已安装」列表中可管理。
+      if (a.runtimeDep) continue;
       list.push({
         key: `app:${a.name}`,
         label: a.access?.title || a.displayName || a.name,
