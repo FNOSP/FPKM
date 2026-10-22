@@ -178,7 +178,14 @@ func DetectEntryWithEnv(targetDir string, env EnvMap) (*EntryInfo, error) {
 		// 脚本模式下该脚本自身负责环境准备与后台启动（含 start/stop 分支），
 		// 直接交给 shell 执行才是正确语义；真正的缺失依赖（如 python3）会由
 		// 脚本或运行时诊断给出明确原因。
-		logger.Warn("无法从 cmd/main 提取二进制路径（%v），回退为执行脚本: %s start", err, cmdMain)
+		// 这里是**正常的回退路径**，不是错误：python312 / nodejs_v24 这类
+		// 应用的 cmd/main 本来就没有可提取的二进制（它调用外部解释器），
+		// 交给 shell 执行脚本才是正确语义。
+		//
+		// 因此用 Debug 记录：入口探测会被状态查询反复调用（桌面小组件、
+		// 商店列表轮询），用 Warn 会在日志里刷屏。真正的问题（脚本执行失败、
+		// 缺依赖）由启动结果与脚本自身输出暴露。
+		logger.Debug("cmd/main 无可提取的二进制，按脚本执行: %s start（原因: %v）", cmdMain, err)
 		return &EntryInfo{
 			Type:    EntryBashScript,
 			Command: shellPath(),

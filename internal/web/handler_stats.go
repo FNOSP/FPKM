@@ -172,7 +172,7 @@ func (s *Server) readStoreStats() StoreStats {
 	if infos, err := s.mgr.List(); err == nil {
 		st.Installed = len(infos)
 		for _, info := range infos {
-			if status, err := s.mgr.Status(info.Name); err == nil && status != nil && status.Running {
+			if status, err := s.mgr.QuickStatus(info.Name); err == nil && status != nil && status.Running {
 				st.Running++
 			}
 		}

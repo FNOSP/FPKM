@@ -137,7 +137,7 @@ func (s *Server) handleStoreApps(w http.ResponseWriter, r *http.Request) {
 			appName := a.ID
 			v.AppName = appName
 
-			if st, serr := s.mgr.Status(appName); serr == nil && st != nil {
+			if st, serr := s.mgr.QuickStatus(appName); serr == nil && st != nil {
 				v.Running = st.Running
 				env, _ := app.LoadEnvFile(s.cfg.AppEnvFile(appName))
 				v.Access = describeAccessFor(s.cfg, appName, st.Port, env, s.cfg.AppDir(appName))
