@@ -165,6 +165,62 @@ FPK 包可以带 `wizard/` 目录，用向导收集用户输入。fpkm 会读取
   `<script>`/`<iframe>` 等危险标签与所有 `on*` 事件属性，
   避免安装包借向导文案执行脚本。
 
+### 0.90 修复压缩包被误当脚本改写（应用装得上却起不来）
+
+#### 现象
+
+Agent2API 3.1.0 能安装，但启动即退出，页面打不开。
+
+#### 根因链
+
+该包把服务端二进制放在 `target/server/agent2api.tar.gz` 内，由
+`install_callback` 执行 `tar -xzf` 解开（正常应解出 13.7MB 的
+`agent2api-server`）。实际只解出 **224KB**。
+
+逐步实测定位（在每个阶段打印文件大小）：
+
+| 阶段 | agent2api.tar.gz 大小 |
+| --- | --- |
+| 搬运到安装目录后 | 8,826,710（完整） |
+| `remapScriptPaths` 之后 | **8,826,591（少 119 字节）** |
+
+两个判定同时失效：
+
+1. **`isScriptFile`**：对「未知扩展名」兜底返回 `true`，`.gz` 不在跳过
+   列表里，于是 `agent2api.tar.gz` 被当成脚本处理。
+2. **`isBinaryContent`**：只统计前 1KB 控制字符占比（阈值 30%），
+   而 gzip 压缩数据约 28%，未达阈值 → 被误判为文本。
+
+于是 `normalizeLineEndings` 把二进制里的 119 个 CRLF 折叠成 LF，
+内层包被破坏。`install_callback` 随即报
+`gzip: invalid compressed data--format violated` / `tar: Unexpected EOF`，
+最终只留下半截二进制。
+
+#### 修法
+
+- `isScriptFile` 改为「**明确的脚本扩展名** 或 **无扩展名**」才处理；
+  任何带扩展名的文件（`.tar.gz` / `.zip` / `.whl` / `.so` / `.bin` /
+  `.json` …）一律跳过。脚本扩展名白名单：
+  `sh/bash/zsh/ksh/ash/py/pl/rb/lua/php/tcl`。
+- `isBinaryContent` 增加强信号：**头部出现 NUL 字节直接判为二进制**。
+  文本文件不含 NUL，而 gzip 头第 4~8 字节是 mtime（常为 0），
+  该判据不受压缩率影响，避免与 30% 阈值擦边。
+
+#### 实测
+
+修复后安装同一包：
+
+```
+解出二进制: 13751728 bytes（完整）
+启动: success，监听 0.0.0.0:3066
+GET / → HTTP 200（128KB 界面）
+fpkm 给出的地址: http://<host>:3066/（running=true）
+```
+
+新增 3 项测试：归档文件不当作脚本、gzip 数据识别为二进制、
+`remapScriptPaths` 不修改 target 下的压缩包（同时验证真脚本仍被正确
+重映射且 CRLF 归一为 LF）。
+
 ### 0.89 合并 FPKM-v1.0.2.3（版本 1.0.3）
 
 从 `dist/待合并代码/FPKM-main/FPKM-v1.0.2.3` 合并。该版本以本项目 1.0.2
