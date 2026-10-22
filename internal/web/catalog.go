@@ -53,6 +53,10 @@ type Source struct {
 	Name    string `json:"name"`
 	URL     string `json:"url"`
 	Enabled bool   `json:"enabled"`
+
+	// Builtin 标记该源由程序内置（不来自 sources.json）。
+	// 内置源可以被停用，但不能被删除。
+	Builtin bool `json:"builtin,omitempty"`
 }
 
 // SourceStore 管理应用源配置（持久化到 sources.json）
@@ -66,34 +70,76 @@ func NewSourceStore(cfg *config.Config) *SourceStore {
 	return &SourceStore{path: filepath.Join(cfg.BaseDir, "sources.json")}
 }
 
-// Load 读取所有源；文件不存在时返回内置默认源
+// Load 返回「内置源 + 用户配置源」合并后的生效列表。
+//
+// 内置源永远在列、且排在最前：配置文件缺失、为空、内容损坏，或者里面
+// 只剩已失效的历史源（例如测试留下的本地 Mock 源），都不会让内置源消失，
+// 从而保证客户端开箱即有可用应用源，无需任何外部配置。
+//
+// 用户配置只能对内置源做覆盖（改名 / 改地址 / 停用），不能把它移除。
 func (s *SourceStore) Load() ([]Source, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	user, err := s.readUserSources()
+	if err != nil {
+		return nil, err
+	}
+	return mergeSources(builtinSources(), user), nil
+}
+
+// readUserSources 读取用户配置（sources.json，不含内置源）。
+//
+// 调用方需持有 s.mu。文件不存在视为「无用户配置」；文件损坏时只记录告警
+// 并退化为内置源，避免一份坏配置把整个应用商店拖成不可用。
+func (s *SourceStore) readUserSources() ([]Source, error) {
 	data, err := os.ReadFile(s.path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return defaultSources(), nil
+			return nil, nil
 		}
 		return nil, err
 	}
 	var out []Source
 	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("解析 sources.json 失败: %w", err)
-	}
-	if len(out) == 0 {
-		return defaultSources(), nil
+		logger.Warn("解析 sources.json 失败，已改用内置源: %v", err)
+		return nil, nil
 	}
 	return out, nil
 }
 
-// Save 覆盖写入源列表
+// Save 只持久化「用户可编辑的部分」：自定义源 + 对内置源的覆盖项。
+//
+// 内置源由程序提供，与内置默认值一致时不落盘；仅当用户改了它的地址 /
+// 名称，或把它停用时，才写一条覆盖项，使这些改动在重启后仍然保留。
 func (s *SourceStore) Save(list []Source) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data, err := json.MarshalIndent(list, "", "  ")
+	user := make([]Source, 0, len(list))
+	for _, src := range list {
+		def, isBuiltin := builtinDefault(src.ID)
+		if isBuiltin {
+			if src.Enabled && src.URL == def.URL && src.Name == def.Name {
+				continue // 与内置默认一致，无需落盘
+			}
+			user = append(user, Source{
+				ID:      src.ID,
+				Name:    src.Name,
+				URL:     src.URL,
+				Enabled: src.Enabled,
+			})
+			continue
+		}
+		user = append(user, Source{
+			ID:      src.ID,
+			Name:    src.Name,
+			URL:     src.URL,
+			Enabled: src.Enabled,
+		})
+	}
+
+	data, err := json.MarshalIndent(user, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -103,14 +149,69 @@ func (s *SourceStore) Save(list []Source) error {
 	return os.WriteFile(s.path, data, 0644)
 }
 
-// defaultSources 内置默认源（与飞牛第三方商店生态一致）
-func defaultSources() []Source {
+// builtinSources 返回随程序内置的应用源（与飞牛第三方商店生态一致）。
+//
+// 这些源编译进二进制，不依赖 data/sources.json，因此天然满足
+// 「开箱可用」：新装、清空数据目录、旧配置只剩失效源时都能照常加载应用列表。
+func builtinSources() []Source {
 	return []Source{{
 		ID:      "official",
 		Name:    "FN软仓官方源",
 		URL:     "http://nas.hhxs2025.top:5660",
 		Enabled: true,
 	}}
+}
+
+// builtinDefault 按 ID 查内置源定义。
+func builtinDefault(id string) (Source, bool) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return Source{}, false
+	}
+	for _, b := range builtinSources() {
+		if b.ID == id {
+			return b, true
+		}
+	}
+	return Source{}, false
+}
+
+// isBuiltinSourceID 判断给定 ID 是否属于内置源。
+func isBuiltinSourceID(id string) bool {
+	_, ok := builtinDefault(id)
+	return ok
+}
+
+// mergeSources 合并内置源与用户配置：
+//   - 内置源在前，并统一标记 Builtin；
+//   - 与内置源同 ID 的用户项视为「覆盖」，可改名、改地址、停用；
+//   - 其余用户项作为自定义源追加在后面。
+func mergeSources(builtin, user []Source) []Source {
+	out := make([]Source, 0, len(builtin)+len(user))
+	index := map[string]int{}
+	for _, b := range builtin {
+		b.Builtin = true
+		index[b.ID] = len(out)
+		out = append(out, b)
+	}
+
+	for _, u := range user {
+		if u.ID != "" {
+			if i, ok := index[u.ID]; ok {
+				if name := strings.TrimSpace(u.Name); name != "" {
+					out[i].Name = name
+				}
+				if u2 := strings.TrimSpace(u.URL); u2 != "" {
+					out[i].URL = u2
+				}
+				out[i].Enabled = u.Enabled
+				continue
+			}
+			index[u.ID] = len(out)
+		}
+		out = append(out, u)
+	}
+	return out
 }
 
 // ---------- 索引拉取与缓存 ----------
@@ -177,7 +278,7 @@ func (c *Catalog) List(force bool) ([]RemoteApp, string, error) {
 	var (
 		all     []RemoteApp
 		errMsgs []string
-		seen    = map[string]bool{}
+		kept    = map[string]int{} // key -> 在 all 中的下标
 	)
 
 	for _, src := range sources {
@@ -195,15 +296,20 @@ func (c *Catalog) List(force bool) ([]RemoteApp, string, error) {
 		for i := range apps {
 			apps[i].SourceID = src.ID
 			apps[i].SourceName = src.Name
-			// 同一应用出现在多个源时，先出现的优先
+			// 同一应用可能出现多架构条目（同源内 x86/arm 各一条），
+			// 优先保留与当前运行架构最匹配的条目，避免 arm64 手机上误留 x86。
 			key := apps[i].ID
 			if key == "" {
 				key = apps[i].Name
 			}
-			if seen[key] {
+			score := archMatchScore(apps[i].Platform)
+			if idx, ok := kept[key]; ok {
+				if score > archMatchScore(all[idx].Platform) {
+					all[idx] = apps[i]
+				}
 				continue
 			}
-			seen[key] = true
+			kept[key] = len(all)
 			all = append(all, apps[i])
 		}
 	}
@@ -481,6 +587,36 @@ func (c *Catalog) downloadOne(url, dst string, onProgress func(done, total int64
 
 // goArch 返回当前 CPU 架构（与 manifest 的 platform 字段对照使用）
 func goArch() string { return runtime.GOARCH }
+
+// archMatchScore 评估条目的 platform 与当前运行架构的匹配度，分三档：
+//   - 2：明确匹配当前架构
+//   - 1：中性（all / 空 / 未知写法，不拦截也不挑拣）
+//   - 0：明确是其他架构
+//
+// 用于同一应用存在多架构条目（如 x86 与 arm 各一条）时，
+// 优先保留与当前机器一致的条目。口径与 platformSupported 保持一致。
+func archMatchScore(platform string) int {
+	return archMatchScoreFor(platform, goArch())
+}
+
+// archMatchScoreFor 与 archMatchScore 同口径，但架构可显式指定（便于单测）。
+func archMatchScoreFor(platform, arch string) int {
+	p := strings.ToLower(strings.TrimSpace(platform))
+	if p == "" || p == "all" {
+		return 1
+	}
+	switch arch {
+	case "amd64":
+		if strings.Contains(p, "x86") || strings.Contains(p, "amd64") || strings.Contains(p, "x64") {
+			return 2
+		}
+	case "arm64":
+		if strings.Contains(p, "arm") {
+			return 2
+		}
+	}
+	return 0
+}
 
 // fileSHA256 计算文件 sha256
 func fileSHA256(path string) (string, error) {

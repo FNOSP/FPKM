@@ -10,6 +10,7 @@ import {
   Modal,
   Dropdown,
   SplitButtonGroup,
+  Tooltip,
 } from '@douyinfe/semi-ui';
 import {
   IconArrowLeft,
@@ -42,6 +43,8 @@ interface Props {
   onOpenApp?: (name: string) => void;
   /** 打开「应用设置」弹窗（选择端口 / 网关 / CGI 接入方式） */
   onOpenSettings?: (appname: string) => void;
+  /** 打开「查看所有日志」页面（列出该应用日志目录下的全部日志文件） */
+  onOpenLogs?: (appname: string) => void;
 }
 
 const { Text, Title, Paragraph } = Typography;
@@ -79,6 +82,7 @@ export default function AppDetailPage({
   onInstall,
   onOpenApp,
   onOpenSettings,
+  onOpenLogs,
 }: Props) {
   const [detail, setDetail] = useState<AppDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -175,18 +179,55 @@ export default function AppDetailPage({
     if (!detail) return null;
 
     // 未安装：安装按钮
+    //
+    // 禁用条件必须与商店列表卡片一致：由服务端按
+    // "本地包实测优先、其次 platform 标签" 给出的 platformSupported 决定。
+    // 早期版本这里写死 `detail.platform === 'arm'` 是给 x86 NAS 用的老规则，
+    // 在 arm64 设备上会把**所有 arm 应用**的安装按钮置灰（明明能装），
+    // 造成"列表能装、详情页灰着点不动"的不一致。
     if (!detail.installed) {
-      return (
+      const unsupported = detail.platformSupported === false;
+      // 不支持时的原因文案：服务端 `unsupportedReason` 是 omitempty，
+      // 应用可用时该字段为空串（或只有空白）。
+      const reason = (detail.unsupportedReason || '').trim();
+      const installButton = (
         <Button
           size="small"
           theme="light"
           type="primary"
           icon={<IconDownloadStroked />}
-          disabled={busy || detail.platform === 'arm'}
+          disabled={busy || unsupported}
           onClick={() => detail.storeId && onInstall(detail.storeId)}
         >
           安装
         </Button>
+      );
+      return (
+        <Space spacing={8} wrap>
+          {/*
+            仅在真的存在「不支持原因」时才挂 Tooltip。
+            Semi 的 Tooltip 不判空 content——传空串同样会渲染一个空内容气泡，
+            悬停/待命时表现为安装按钮上方压着一个空白黑框（无内容却显示）。
+          */}
+          {reason ? (
+            <Tooltip content={reason} position="top">
+              {installButton}
+            </Tooltip>
+          ) : (
+            installButton
+          )}
+          {unsupported ? (
+            <Tag size="small" color="grey">
+              不支持 {detail.platform}
+            </Tag>
+          ) : detail.platformWarning ? (
+            <Tooltip content={detail.platformWarning}>
+              <Tag size="small" color="orange">
+                标注 {detail.platform}
+              </Tag>
+            </Tooltip>
+          ) : null}
+        </Space>
       );
     }
 
@@ -233,6 +274,10 @@ export default function AppDetailPage({
           render={
             // 菜单宽度与分裂按钮整体一致（见 .fpkm-split-menu）
             <Dropdown.Menu className="fpkm-split-menu">
+              {/* 查看该应用的全部日志文件（Web / Android / Windows 三端一致） */}
+              {onOpenLogs ? (
+                <Dropdown.Item onClick={() => onOpenLogs(detail.name)}>查看日志</Dropdown.Item>
+              ) : null}
               {/* 仅在运行中才显示"停止" */}
               {detail.running ? (
                 <Dropdown.Item onClick={() => onAction(detail.name, 'stop')}>

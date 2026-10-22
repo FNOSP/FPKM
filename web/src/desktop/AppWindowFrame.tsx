@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button, Spin, Tooltip, Typography } from '@douyinfe/semi-ui';
 import {
   IconMinus,
@@ -7,6 +7,7 @@ import {
   IconClose,
   IconRefresh,
 } from '@douyinfe/semi-icons';
+import { clampRect } from './windowRect';
 
 const { Text } = Typography;
 
@@ -84,6 +85,25 @@ function AppWindowFrameInner({
   const liveRef = useRef<WindowRect | null>(null);
 
   /**
+   * 实际渲染/交互用的几何。
+   *
+   * win.rect 是"用户的几何"（由拖动/缩放决定，持久化到 localStorage）。
+   * 桌面尺寸（bounds）会随着浏览器窗口变化而变化：窗口被缩小/放大后，
+   * 如果仍按 win.rect 的绝对像素渲染，窗口就会跑到可视区之外或留着大片空白
+   * （表现为"浏览器窗口变了，商店窗口不跟着自适应"）。
+   *
+   * 因此：
+   *   - 最大化        → 始终铺满当前桌面尺寸；
+   *   - 普通窗口      → 把用户几何夹进当前桌面范围内。
+   * 这样浏览器窗口变化时窗口立即跟随收缩/展开，而 win.rect 仍保留用户
+   * 原本设定的宽高，桌面重新变大后可回到原尺寸。
+   */
+  const rect = useMemo<WindowRect>(() => {
+    if (win.maximized) return { x: 0, y: 0, w: bounds.w, h: bounds.h };
+    return clampRect(win.rect, bounds);
+  }, [win.maximized, win.rect, bounds.w, bounds.h]);
+
+  /**
    * 指针移动：拖动或缩放。
    *
    * 性能要点（修复"拖动卡顿"）：
@@ -106,11 +126,11 @@ function AppWindowFrameInner({
 
       const d = dragRef.current;
       if (d) {
-        const nx = Math.min(Math.max(0, e.clientX - d.dx), Math.max(0, bounds.w - win.rect.w));
-        const ny = Math.min(Math.max(0, e.clientY - d.dy), Math.max(0, bounds.h - win.rect.h));
-        liveRef.current = { ...win.rect, x: nx, y: ny };
+        const nx = Math.min(Math.max(0, e.clientX - d.dx), Math.max(0, bounds.w - rect.w));
+        const ny = Math.min(Math.max(0, e.clientY - d.dy), Math.max(0, bounds.h - rect.h));
+        liveRef.current = { ...rect, x: nx, y: ny };
         // 用 translate 表现位移，避免 left/top 触发重排
-        el.style.transform = `translate3d(${nx - win.rect.x}px, ${ny - win.rect.y}px, 0)`;
+        el.style.transform = `translate3d(${nx - rect.x}px, ${ny - rect.y}px, 0)`;
         return;
       }
 
@@ -141,7 +161,7 @@ function AppWindowFrameInner({
         el.style.height = `${h}px`;
       }
     },
-    [bounds.w, bounds.h, win.rect],
+    [bounds.w, bounds.h, rect],
   );
 
   const stop = useCallback(() => {
@@ -227,7 +247,7 @@ function AppWindowFrameInner({
     } catch {
       /* 某些浏览器/合成事件不支持，忽略即可（还有遮罩兜底） */
     }
-    dragRef.current = { dx: e.clientX - win.rect.x, dy: e.clientY - win.rect.y };
+    dragRef.current = { dx: e.clientX - rect.x, dy: e.clientY - rect.y };
     setDragging(true);
   };
 
@@ -240,7 +260,7 @@ function AppWindowFrameInner({
     } catch {
       /* 忽略 */
     }
-    resizeRef.current = { startX: e.clientX, startY: e.clientY, rect: win.rect, dir };
+    resizeRef.current = { startX: e.clientX, startY: e.clientY, rect, dir };
     setResizing(dir);
   };
 
@@ -256,10 +276,10 @@ function AppWindowFrameInner({
       ref={boxRef}
       className={`fpkm-win ${active ? 'fpkm-win-active' : ''}`}
       style={{
-        left: win.rect.x,
-        top: win.rect.y,
-        width: win.rect.w,
-        height: win.rect.h,
+        left: rect.x,
+        top: rect.y,
+        width: rect.w,
+        height: rect.h,
         zIndex: win.z,
       }}
       onPointerDown={onFocus}

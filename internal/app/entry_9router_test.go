@@ -130,8 +130,12 @@ func TestRouter9EntryDetection(t *testing.T) {
 	// 应为完整 bash 脚本或 Node 应用，而不是从 cmd/main 硬提二进制路径
 	switch entry.Type {
 	case EntryBashScript:
-		if entry.Command != "bash" {
-			t.Errorf("BashScript 类型的命令应为 bash，实际 %q", entry.Command)
+		// 解释器由 shellPath() 按可用性解析：fnOS 上是 bash，Android 上回退 sh，
+		// Windows 构建机上会解析到 bash 的绝对路径；这里只校验解释器种类，
+		// 不要求恰好等于字面量 "bash"。
+		name := filepath.Base(entry.Command)
+		if name != "bash" && name != "bash.exe" && name != "sh" && name != "sh.exe" {
+			t.Errorf("BashScript 类型的命令应为 bash/sh 解释器，实际 %q", entry.Command)
 		}
 	case EntryNodeJS:
 		// 也算合理：能识别出 node 入口

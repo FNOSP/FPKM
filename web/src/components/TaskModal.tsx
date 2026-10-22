@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Modal, Typography, Banner, Button, Spin, Progress } from '@douyinfe/semi-ui';
 import type { TaskSnapshot } from '../api/types';
 import { useTaskLog } from '../hooks/useTaskLog';
+import { useViewport, fitPopupWidth, fitLogHeight } from '../hooks/useViewport';
 import LogViewer from './LogViewer';
 
 interface Props {
@@ -33,6 +34,12 @@ export default function TaskModal({
   onFinished,
 }: Props) {
   const { lines, snapshot, finished, failed } = useTaskLog(visible ? taskId : null);
+
+  // 弹窗由 portal 挂到 body，固定 760px 在手机上会溢出屏幕：
+  // 按视口收敛宽度，并按视口高度收紧日志面板，保证一屏内可见。
+  const vp = useViewport();
+  const modalWidth = fitPopupWidth(760, vp);
+  const logHeight = fitLogHeight(340, vp);
 
   const uploading = uploadPercent !== null && uploadPercent !== undefined && uploadPercent < 100;
   const running = !finished && (Boolean(taskId) || uploading);
@@ -129,7 +136,8 @@ export default function TaskModal({
           {running ? '执行中…' : '关闭'}
         </Button>
       }
-      width={760}
+      width={modalWidth}
+      bodyStyle={vp.narrow ? { padding: '14px 14px 18px' } : undefined}
       maskClosable={!running}
       closable={!running}
     >
@@ -139,7 +147,7 @@ export default function TaskModal({
           实时日志
         </Text>
       </div>
-      <LogViewer lines={lines} height={340} />
+      <LogViewer lines={lines} height={logHeight} />
       {snapshot?.ended && snapshot?.started ? (
         <Paragraph type="tertiary" size="small" style={{ marginTop: 10, marginBottom: 0 }}>
           耗时 {((snapshot.ended - snapshot.started) / 1000).toFixed(1)} 秒

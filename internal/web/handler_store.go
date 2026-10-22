@@ -87,6 +87,7 @@ func (s *Server) handleStoreApps(w http.ResponseWriter, r *http.Request) {
 	filter := newArchFilter(s.scanDownloadedPackages())
 
 	out := make([]StoreApp, 0, len(apps))
+	hidden := 0
 	for _, a := range apps {
 		v := StoreApp{
 			ID:          a.ID,
@@ -107,6 +108,21 @@ func (s *Server) handleStoreApps(w http.ResponseWriter, r *http.Request) {
 			Icon:        a.Icon,
 		}
 		verdict := filter.check(a)
+
+		// 只展示与当前机器架构匹配的条目。
+		//
+		// 应用源的 platform 标签经常填错（纯脚本应用也会被标成某个架构），
+		// 所以**本地已下载的包探测结果优先**（verdict.proven）；
+		// 没有任何本地证据时，就按标签判定 —— 标签明确指向其他架构
+		// （arm64 机器上的 x86/amd64 条目）的条目直接从列表移除，
+		// 避免用户看到装上去也跑不起来的应用。
+		if !archUsable(a, verdict, arch) {
+			hidden++
+			logger.Debug("按架构过滤隐藏商店条目: %s (platform=%s, 当前架构=%s)",
+				a.ID, strings.TrimSpace(a.Platform), arch)
+			continue
+		}
+
 		v.PlatformSupported = verdict.ok
 		v.UnsupportedReason = verdict.reason
 		v.PlatformWarning = verdict.warning
@@ -130,11 +146,16 @@ func (s *Server) handleStoreApps(w http.ResponseWriter, r *http.Request) {
 		out = append(out, v)
 	}
 
+	if hidden > 0 {
+		logger.Debug("商店列表按架构过滤：保留 %d 个，隐藏 %d 个（当前架构 %s）", len(out), hidden, arch)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"apps":    out,
 		"total":   len(out),
 		"warning": warn,
 		"arch":    arch,
+		"hidden":  hidden,
 	})
 }
 
@@ -142,11 +163,15 @@ func (s *Server) handleStoreApps(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSources(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		start := time.Now()
 		list, err := s.catalog.store.Load()
 		if err != nil {
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		// 禁止任何中间层/浏览器缓存，且记录处理耗时，便于定位"应用源一直加载中"。
+		w.Header().Set("Cache-Control", "no-store")
+		logger.Debug("GET /api/store/sources done in %s, sources=%d", time.Since(start), len(list))
 		writeJSON(w, http.StatusOK, map[string]any{"sources": list})
 
 	case http.MethodPost:
@@ -228,6 +253,12 @@ func (s *Server) handleSourceItem(w http.ResponseWriter, r *http.Request) {
 	id = strings.Trim(id, "/")
 	if id == "" {
 		writeJSONError(w, http.StatusBadRequest, "缺少源 ID")
+		return
+	}
+	// 内置源不参与删除：它由程序提供，删掉也会在下次 Load 时回来，
+	// 与其让用户看到"删了又出现"，不如明确告知只能停用。
+	if isBuiltinSourceID(id) {
+		writeJSONError(w, http.StatusBadRequest, "内置应用源不可删除，可将其停用")
 		return
 	}
 
@@ -745,6 +776,19 @@ func archName() string {
 	return goArch()
 }
 
+// archUsable 判断商店条目在当前架构下"装得起来、跑得动"。
+//
+// 商店列表的展示过滤与详情页的安装按钮状态共用同一结论，
+// 避免出现"列表能装、详情页却灰着点不动"这类不一致：
+//   - platform 标签与当前架构匹配（含 all / 空）→ 可用；
+//   - 标签不匹配，但**本地已下载的包**实测证明可运行（纯脚本等）→ 可用；
+//   - 本地包实测证明含其他架构二进制（verdict.ok=false）→ 不可用；
+//   - 标签明确指向其他架构、又没有本地包可实测 → 不可用
+//     （装上也跑不起来，列表直接不展示）。
+func archUsable(a RemoteApp, verdict archVerdict, arch string) bool {
+	return verdict.ok && (platformSupported(a.Platform, arch) || verdict.proven)
+}
+
 // platformSupported 判断平台的兼容性。
 // manifest/platform 常见取值：all / x86 / arm / amd64 / arm64
 func platformSupported(platform, arch string) bool {
@@ -793,6 +837,10 @@ type archVerdict struct {
 	ok      bool
 	warning string
 	reason  string
+	// proven 表示该结论来自对**本地已下载安装包**的真实探测，
+	// 而不是依据应用源的 platform 标签推断。
+	// 只有 proven 的结果才允许"顶着标签不匹配也照常展示/安装"。
+	proven bool
 }
 
 // check 判断条目是否可安装。
@@ -816,12 +864,12 @@ func (f *archFilter) check(a RemoteApp) archVerdict {
 			verdict = softVerdict(a)
 		case report.ScriptOnly:
 			// 纯脚本/前端：与架构无关，任何机器都能装
-			verdict = archVerdict{ok: true}
+			verdict = archVerdict{ok: true, proven: true}
 		case report.UnsupportedReason != "":
 			// 确有二进制且不匹配 → 硬拦截
-			verdict = archVerdict{ok: false, reason: formatArchReason(report, a)}
+			verdict = archVerdict{ok: false, reason: formatArchReason(report, a), proven: true}
 		default:
-			verdict = archVerdict{ok: true}
+			verdict = archVerdict{ok: true, proven: true}
 		}
 		f.cache[appKey] = verdict
 		return verdict

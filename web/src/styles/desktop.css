@@ -73,15 +73,17 @@
 
    窗口放在任务栏**同级**的独立层里，而不是 .fpkm-desktop-area 内：
      - 那个容器 overflow:hidden，会把拖到底部的窗口裁掉；
-     - 它的高度不含任务栏，bounds 因此永远到不了任务栏位置。
+     - 本层铺满桌面，窗口位置由 JS 的 bounds 约束。
 
    层级关系（从下到上）：
      .fpkm-desktop-area  z-index: 1   （图标）
      .fpkm-window-layer  z-index: 2   （窗口，窗口自身再叠加 10+）
      .fpkm-dock          z-index: 9000（任务栏，始终最顶层）
 
-   因此窗口可以移动到任务栏的位置并盖住它，但任务栏永远可见、可点。
-   任务栏比窗口高这么多，也保证"拖动窗口时不会被窗口盖住"。 */
+   任务栏永远最顶层，所以窗口盖不住它；反过来，bounds 的高度已扣除
+   任务栏高度（见 Desktop.tsx 的 measure），窗口底部也不会伸到任务栏
+   下面 —— 否则窗口内容最靠下的那一栏会被任务栏永远压住，手机窄屏下
+   的日志正文正是这样被挡住的。 */
 .fpkm-window-layer {
   position: absolute;
   inset: 0;

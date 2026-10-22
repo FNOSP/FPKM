@@ -39,6 +39,10 @@ export class ApiError extends Error {
   }
 }
 
+/** 默认请求超时：避免 Android WebView/网络栈异常时 fetch 永不结束，
+ *  前端一直停留在"加载中"状态。调用方可通过 init.signal 主动取消。 */
+const REQUEST_TIMEOUT_MS = 15000;
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   // 会话由 HttpOnly Cookie 自动携带（同源 fetch 默认 credentials: same-origin）
@@ -46,11 +50,25 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set('Content-Type', 'application/json');
   }
 
+  // 超时兜底：AbortController 15s 后中止请求，
+  // 调用方传入的 signal 也可以随时取消本请求。
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  if (init.signal) {
+    if (init.signal.aborted) {
+      controller.abort();
+    } else {
+      init.signal.addEventListener('abort', () => controller.abort(), { once: true });
+    }
+  }
+
   let resp: Response;
   try {
-    resp = await fetch(path, { ...init, headers });
+    resp = await fetch(path, { ...init, headers, signal: controller.signal });
   } catch (e) {
     throw new ApiError(0, '无法连接服务：' + (e instanceof Error ? e.message : String(e)));
+  } finally {
+    clearTimeout(timer);
   }
 
   // 401 处理：登录/设置密码接口的 401 是"密码不对"这类业务错误，
@@ -155,6 +173,21 @@ export function appAction(
     method: 'POST',
     body: JSON.stringify({ values: values ?? {} }),
   });
+}
+
+/** 查看某个应用的全部日志文件（「查看所有日志」）。
+ *  tail 为每个文件返回的尾部字节数上限，缺省由服务端决定。 */
+export function getAppLogs(name: string, tail?: number): Promise<import('./types').AppLogsView> {
+  const qs = tail && tail > 0 ? `?tail=${Math.floor(tail)}` : '';
+  return request(`/api/apps/${encodeURIComponent(name)}/log${qs}`);
+}
+
+/** 查看 FPKM **程序自身**的日志文件（「FPKM 日志」页）。
+ *  与「应用日志」不同，它读取的是程序日志目录（<数据目录>/logs），
+ *  用于排查网关、宿主进程、安装流程等 FPKM 自身的问题。 */
+export function getFpkmLogs(tail?: number): Promise<import('./types').AppLogsView> {
+  const qs = tail && tail > 0 ? `?tail=${Math.floor(tail)}` : '';
+  return request(`/api/logs${qs}`);
 }
 
 /** 列出目录 */

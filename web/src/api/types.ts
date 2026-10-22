@@ -157,6 +157,15 @@ export interface AppDetail {
   access: AccessInfo;
 
   storeId?: string;
+/**
+   * 架构判定，与商店列表页同一口径：
+   * false 表示当前机器确定无法运行，安装按钮应置灰。
+   */
+  platformSupported?: boolean;
+  /** 不可运行的原因（为空表示可运行） */
+  unsupportedReason?: string;
+  /** 软提示：平台标签可能不匹配，但不阻止安装 */
+  platformWarning?: string;
   /** 依赖的运行时程序；仅本地能读到 manifest 时有值 */
   dependencies?: DepApp[] | null;
 }
@@ -166,6 +175,36 @@ export interface LogLine {
   level: 'debug' | 'info' | 'warn' | 'error' | string;
   text: string;
   ts: number;
+}
+
+/** 单个日志文件的内容视图（「查看所有日志」） */
+export interface AppLogFileView {
+  name: string;
+  path: string;
+  size: number;
+  modTime?: string;
+  /** 文件尾部内容（大文件按完整行截断） */
+  content: string;
+  /** 内容是否因超过 tail 上限而被截断 */
+  truncated: boolean;
+}
+
+/** 「查看所有日志」返回体：某应用日志目录下的全部日志文件 */
+export interface AppLogsView {
+  name: string;
+  dir: string;
+  /** 每个文件返回的尾部字节数上限 */
+  tailBytes: number;
+  files: AppLogFileView[];
+  /** 目录不存在或为空（前端据此提示"暂无日志"） */
+  missing?: boolean;
+  hint?: string;
+  /**
+   * 写入日志的宿主时区相对 UTC 的偏移秒数（东为正）。
+   * 日志行首时间是宿主按其本地时区写入的，前端据此换算成**访问者本地时间**
+   * （见 utils/logtime.ts 的 localizeLogTimes）。
+   */
+  tzOffsetSeconds?: number;
 }
 
 export interface TaskProgress {
@@ -239,6 +278,8 @@ export interface AppSource {
   name: string;
   url: string;
   enabled: boolean;
+  /** 程序内置源：始终存在，只能停用不能删除 */
+  builtin?: boolean;
 }
 
 /** 向导校验规则 */

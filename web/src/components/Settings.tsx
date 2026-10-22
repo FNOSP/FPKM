@@ -12,10 +12,12 @@ import {
   Switch,
   Toast,
   Descriptions,
+  Tag,
 } from '@douyinfe/semi-ui';
 import { IconDelete, IconPlus, IconLock } from '@douyinfe/semi-icons';
 import type { AppSource, MetaInfo } from '../api/types';
 import { listSources, saveSource, deleteSource, changePassword, setSession } from '../api/client';
+import { useViewport, fitPopupWidth } from '../hooks/useViewport';
 
 const { Paragraph, Text } = Typography;
 
@@ -35,6 +37,12 @@ export default function Settings({ visible, initialTab = 'sources', meta, onClos
   const [tab, setTab] = useState<SettingsTab>(initialTab);
   const [sources, setSources] = useState<AppSource[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
+
+  // 侧滑面板按视口收敛宽度：宽屏 640px，手机窄屏占满整屏，避免 640px
+  // 固定宽度在小屏上把内容挤出屏幕（面板由 portal 挂到 body，CSS 断点管不到）。
+  const vp = useViewport();
+  const sheetWidth = vp.narrow ? vp.width : fitPopupWidth(640, vp);
 
   useEffect(() => {
     if (visible) setTab(initialTab);
@@ -42,11 +50,14 @@ export default function Settings({ visible, initialTab = 'sources', meta, onClos
 
   const refresh = async () => {
     setLoading(true);
+    setLoadError('');
     try {
       const res = await listSources();
       setSources(res.sources ?? []);
-    } catch {
-      /* 忽略 */
+    } catch (e) {
+      // request() 带 15s 超时兜底，这里保证不会无限停留在"正在加载"。
+      setSources([]);
+      setLoadError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
@@ -57,14 +68,22 @@ export default function Settings({ visible, initialTab = 'sources', meta, onClos
   }, [visible]);
 
   return (
-    <SideSheet title="设置" visible={visible} onCancel={onClose} width={640}>
+    <SideSheet
+      title="设置"
+      visible={visible}
+      onCancel={onClose}
+      width={sheetWidth}
+      bodyStyle={vp.narrow ? { padding: '14px 14px 24px' } : undefined}
+    >
       <Tabs type="line" activeKey={tab} onChange={(k) => setTab(k as SettingsTab)}>
         <TabPane tab="应用源" itemKey="sources">
           <SourcesSection
             sources={sources}
             loading={loading}
+            loadError={loadError}
             onChanged={(list) => {
               setSources(list);
+              setLoadError('');
               onSourcesChanged(list);
             }}
           />
@@ -75,7 +94,7 @@ export default function Settings({ visible, initialTab = 'sources', meta, onClos
         </TabPane>
 
         <TabPane tab="关于" itemKey="about">
-          <AboutSection meta={meta} />
+          <AboutSection meta={meta} narrow={vp.narrow} />
         </TabPane>
       </Tabs>
     </SideSheet>
@@ -87,10 +106,12 @@ export default function Settings({ visible, initialTab = 'sources', meta, onClos
 function SourcesSection({
   sources,
   loading,
+  loadError,
   onChanged,
 }: {
   sources: AppSource[];
   loading: boolean;
+  loadError?: string;
   onChanged: (list: AppSource[]) => void;
 }) {
   const [name, setName] = useState('');
@@ -140,31 +161,44 @@ function SourcesSection({
   return (
     <Space vertical align="start" spacing={14} style={{ width: '100%', paddingTop: 8 }}>
       <Banner
-        type="info"
+        type={loadError ? 'danger' : 'info'}
         closeIcon={null}
-        description="应用源提供应用索引与安装包下载地址。可添加多个源；同一应用以先出现的源为准。"
+        description={loadError || '应用源提供应用索引与安装包下载地址。可添加多个源；同一应用以先出现的源为准。'}
       />
 
       {sources.length === 0 ? (
-        <Empty title={loading ? '正在加载…' : '还没有配置应用源'} description="在下方添加一个源地址" />
+        <Empty
+          title={loading ? '正在加载…' : loadError ? '应用源加载失败' : '还没有配置应用源'}
+          description={loadError ? '请确认服务正常后点击下方按钮重试，或重新打开设置面板。' : '在下方添加一个源地址'}
+        />
       ) : (
         <div style={{ width: '100%' }}>
           {sources.map((s) => (
             <div key={s.id} className="fpkm-source-row">
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 13.5 }}>{s.name || s.id}</div>
+                <div style={{ fontWeight: 600, fontSize: 13.5 }}>
+                  {s.name || s.id}
+                  {s.builtin ? (
+                    <Tag size="small" color="blue" style={{ marginLeft: 8, transform: 'translateY(-1px)' }}>
+                      内置
+                    </Tag>
+                  ) : null}
+                </div>
                 <div className="fpkm-fs-path" style={{ marginTop: 4 }}>
                   {s.url}
                 </div>
               </div>
               <Switch checked={s.enabled} onChange={(v) => toggle(s, v)} />
-              <Button
-                icon={<IconDelete />}
-                type="danger"
-                theme="borderless"
-                aria-label="删除应用源"
-                onClick={() => remove(s)}
-              />
+              {/* 内置源只能停用、不能删除，因此不渲染删除按钮 */}
+              {s.builtin ? null : (
+                <Button
+                  icon={<IconDelete />}
+                  type="danger"
+                  theme="borderless"
+                  aria-label="删除应用源"
+                  onClick={() => remove(s)}
+                />
+              )}
             </div>
           ))}
         </div>
@@ -285,11 +319,13 @@ function SecuritySection({ onPasswordChanged }: { onPasswordChanged: (session: s
 
 /** ---------- 关于 ---------- */
 
-function AboutSection({ meta }: { meta: MetaInfo | null }) {
+function AboutSection({ meta, narrow = false }: { meta: MetaInfo | null; narrow?: boolean }) {
   return (
     <Space vertical align="start" spacing={12} style={{ width: '100%', paddingTop: 8 }}>
       <Descriptions
-        row
+        // 宽屏一行铺开；窄屏改为每行一条，否则数据目录等长文本会被挤成竖排
+        row={!narrow}
+        column={narrow ? 1 : 3}
         size="small"
         data={[
           { key: '版本', value: meta?.version ?? '-' },

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -48,6 +49,15 @@ type AppDetail struct {
 
 	// ID 商店条目的编号（用于安装）；已安装应用为空
 	StoreID string `json:"storeId,omitempty"`
+
+	// 架构判定：与商店列表页使用**同一口径**（archFilter），
+	// 保证"列表能装、详情页却置灰"这类不一致不再出现。
+	// PlatformSupported 当前机器能否运行
+	PlatformSupported bool `json:"platformSupported"`
+	// UnsupportedReason 确定不可运行的原因（为空表示可运行）
+	UnsupportedReason string `json:"unsupportedReason,omitempty"`
+	// PlatformWarning 软提示：平台标签看起来不匹配，但未核实，不阻止安装
+	PlatformWarning string `json:"platformWarning,omitempty"`
 }
 
 // handleAppDetail GET /api/detail?app=<name> 或 ?id=<storeId>
@@ -100,6 +110,10 @@ func (s *Server) detailForInstalled(w http.ResponseWriter, name string) {
 		Dependencies:     s.resolveDepApps(deps),
 		InstallPath:      s.cfg.AppDir(name),
 	}
+
+	// 已安装应用不会渲染"安装"按钮，这里只按 manifest 标签给出一致性标记，
+	// 供详情页展示（不用于禁用任何操作）。
+	detail.PlatformSupported = platformSupported(manifest.Platform, archName())
 
 	if st, err := s.mgr.Status(name); err == nil && st != nil {
 		detail.Running = st.Running
@@ -184,6 +198,21 @@ func (s *Server) detailForStore(w http.ResponseWriter, storeID string) {
 		Repo:        a.Repo,
 		SourceName:  a.SourceName,
 		Icon:        a.Icon,
+	}
+
+	// 架构判定：复用商店列表的 archFilter（含"本地包实测优先"规则），
+	// 并且同样把"标签明确指向其他架构且无本地证据"的条目判为不可安装 ——
+	// 这类条目已经不会出现在列表里，直接打开详情链接时也不能装。
+	verdict := newArchFilter(s.scanDownloadedPackages()).check(a)
+	detail.PlatformSupported = archUsable(a, verdict, archName())
+	detail.PlatformWarning = verdict.warning
+	if !detail.PlatformSupported {
+		if verdict.reason != "" {
+			detail.UnsupportedReason = verdict.reason
+		} else {
+			detail.UnsupportedReason = fmt.Sprintf(
+				"应用源标注为 %s 架构，当前机器为 %s，无法运行", strings.TrimSpace(a.Platform), archName())
+		}
 	}
 
 	// 未安装时若本地已缓存该包，提前展示依赖（安装前就知道要装哪些运行时）。

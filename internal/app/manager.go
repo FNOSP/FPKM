@@ -544,7 +544,7 @@ func (m *Manager) runUninstallCallback(appname, appDir string, values map[string
 	}
 	env["TRIM_APP_STATUS"] = "STOP"
 
-	cmd := exec.Command("bash", script)
+	cmd := exec.Command(shellPath(), script)
 	cmd.Dir = appDir
 	cmd.Env = append(os.Environ(), env.ToOsEnv()...)
 
@@ -796,6 +796,14 @@ func (m *Manager) Start(appname string) error {
 		logger.Info("二进制兼容性: %s", reason)
 	}
 
+	// 运行时依赖检查：cmd/main 往往通过外部运行时启动（python3 / node / java 等）。
+	// 这些运行时在 Android 等精简环境里并不存在，脚本会自行退出（退出码 1），
+	// 界面只能看到脚本打印的一行日志。这里在启动前显式探测并给出明确原因。
+	if required, missing := DetectRuntimePrereqs(filepath.Join(appDir, "cmd", "main")); len(missing) > 0 {
+		logger.Warn("运行时依赖缺失: 需要 %v，缺少 %v", required, missing)
+		return RuntimePrereqError(missing)
+	}
+
 	// Node.js 应用需要先安装依赖
 	if entry.NeedsInstall {
 		logger.Info("正在安装依赖...")
@@ -806,8 +814,9 @@ func (m *Manager) Start(appname string) error {
 			}
 			cmd := exec.Command(npmCmd, "install", "--omit=dev")
 			cmd.Dir = entry.WorkDir
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
+			// 输出补上日志发生时间，便于事后按时间检索安装过程
+			cmd.Stdout = logger.NewStampWriter(os.Stdout)
+			cmd.Stderr = logger.NewStampWriter(os.Stderr)
 			if err := cmd.Run(); err != nil {
 				return fmt.Errorf("安装依赖失败: %w", err)
 			}
@@ -1324,11 +1333,12 @@ func (m *Manager) Stop(appname string) error {
 	if isGatewayApp {
 		cmdMain := filepath.Join(appDir, "cmd", "main")
 		if fileExists(cmdMain) && isFullBashScript(cmdMain) {
-			logger.Info("执行停止脚本: bash %s stop", cmdMain)
+			sh := shellPath()
+			logger.Info("执行停止脚本: %s %s stop", sh, cmdMain)
 			if env == nil {
 				env = EnvMap{}
 			}
-			stopCmd := exec.Command("bash", cmdMain, "stop")
+			stopCmd := exec.Command(sh, cmdMain, "stop")
 			stopCmd.Dir = m.cfg.AppTargetDir(appname)
 			stopCmd.Env = append(os.Environ(), env.ToOsEnv()...)
 			if output, err := stopCmd.CombinedOutput(); err != nil {
@@ -1547,7 +1557,7 @@ func (m *Manager) processLifecycleScripts(appDir, appname string, env EnvMap) er
 		logger.Debug("chmod install_callback 失败: %v", err)
 	}
 
-	cmd := exec.Command("bash", installCallback)
+	cmd := exec.Command(shellPath(), installCallback)
 	cmd.Dir = appDir
 	cmd.Env = append(os.Environ(), env.ToOsEnv()...)
 
@@ -2264,7 +2274,8 @@ func (m *Manager) startGatewayDaemon() error {
 		return fmt.Errorf("获取可执行文件路径失败: %w", err)
 	}
 
-	logFile, err := os.OpenFile(m.cfg.GatewayLogFile(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	// 网关日志同样按行补发生时间，与其它日志保持一致
+	logFile, err := openAppLog(m.cfg.GatewayLogFile())
 	if err != nil {
 		return fmt.Errorf("打开网关日志文件失败: %w", err)
 	}

@@ -21,6 +21,8 @@ import {
   IconExit,
   IconGridSquare,
   IconSetting,
+  IconMenu,
+  IconTerminal,
 } from '@douyinfe/semi-icons';
 
 import type {
@@ -62,6 +64,7 @@ import UploadInstaller from './components/UploadInstaller';
 import InstallConfirm from './components/InstallConfirm';
 import WizardModal from './components/WizardModal';
 import AppDetailPage from './components/AppDetailPage';
+import AppLogsPage from './components/AppLogsPage';
 import Desktop from './desktop/Desktop';
 import { buildAccessURL } from './utils/format';
 import TaskModal from './components/TaskModal';
@@ -69,8 +72,8 @@ import Settings, { type SettingsTab } from './components/Settings';
 
 const { Text } = Typography;
 
-/** 侧边栏视图 */
-type View = 'home' | 'all' | 'installed' | 'detail';
+/** 侧边栏视图；日志拆成两页：fpkmLogs=程序自身日志，appLogs=各应用日志 */
+type View = 'home' | 'all' | 'installed' | 'detail' | 'appLogs' | 'fpkmLogs';
 /** 详情页的来源视图；'desktop' 表示从桌面右键进入 */
 type DetailOrigin = View | 'desktop';
 
@@ -95,6 +98,40 @@ export default function App() {
   const [detailTarget, setDetailTarget] = useState<{ appname?: string; storeId?: string } | null>(null);
   // 详情页来源视图，返回时回到原处（商店列表 / 已安装列表）
   const [detailFrom, setDetailFrom] = useState<DetailOrigin>('home');
+
+  /**
+   * 商店外壳布局：窄屏（手机）适配与左侧栏收缩。
+   *
+   * shellNode  —— 外壳根节点（回调 ref）；用它测「容器实际宽度」而非视口宽度，
+   *               这样既能适配手机小视口，也能适配桌面浏览器里被拖窄的商店窗口。
+   * shellNarrow —— 容器宽度 < 768px 视为窄屏：侧栏改为覆盖式抽屉、卡片单列。
+   * sideOpen    —— 侧栏是否展开。宽屏默认展开，窄屏默认收起。
+   */
+  const [shellNode, setShellNode] = useState<HTMLDivElement | null>(null);
+  const [shellNarrow, setShellNarrow] = useState(false);
+  const [sideOpen, setSideOpen] = useState(true);
+
+  useEffect(() => {
+    if (!shellNode) return;
+    // 只在"首次测量"与"宽窄切换"时改变展开状态，
+    // 避免用户手动收起后又因普通 resize 被强制展开。
+    let wasNarrow: boolean | null = null;
+    const apply = (width: number) => {
+      const narrow = width > 0 && width < 768;
+      setShellNarrow(narrow);
+      if (wasNarrow === null || narrow !== wasNarrow) {
+        setSideOpen(!narrow);
+      }
+      wasNarrow = narrow;
+    };
+
+    apply(shellNode.clientWidth);
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) apply(entry.contentRect.width);
+    });
+    ro.observe(shellNode);
+    return () => ro.disconnect();
+  }, [shellNode]);
 
   /**
    * 页面标题随"当前属于哪一层界面"切换。
@@ -130,6 +167,9 @@ export default function App() {
   const [apps, setApps] = useState<AppView[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // 「查看所有日志」：进入该视图时要预选的应用名（空则默认第一个应用）
+  const [logsApp, setLogsApp] = useState('');
 
   // 应用源
   const [sources, setSources] = useState<AppSource[]>([]);
@@ -687,7 +727,14 @@ export default function App() {
      */
     onOpenApp?: (appName: string) => void,
   ) => (
-    <div className="fpkm-shell">
+    <div
+      ref={setShellNode}
+      className={
+        'fpkm-shell' +
+        (shellNarrow ? ' fpkm-shell-narrow' : '') +
+        (sideOpen ? ' fpkm-shell-side-open' : '')
+      }
+    >
       {/* ================= 侧边栏 ================= */}
       <aside className="fpkm-side">
         <div className="fpkm-side-brand">
@@ -698,7 +745,13 @@ export default function App() {
           </div>
         </div>
 
-        <nav className="fpkm-nav">
+        <nav
+          className="fpkm-nav"
+          onClickCapture={() => {
+            // 窄屏下侧栏是覆盖式抽屉：点任意导航项后自动收起，露出内容区
+            if (shellNarrow) setSideOpen(false);
+          }}
+        >
           {/* 返回 FPKM 桌面 */}
           <div
             className="fpkm-nav-item fpkm-nav-back-desktop"
@@ -778,6 +831,27 @@ export default function App() {
             {apps.length ? <span className="fpkm-nav-badge">{apps.length}</span> : null}
           </div>
           <div
+            className={`fpkm-nav-item ${view === 'fpkmLogs' ? 'fpkm-nav-item-active' : ''}`}
+            onClick={() => {
+              setView('fpkmLogs');
+              setKeyword('');
+            }}
+          >
+            <IconTerminal />
+            FPKM 日志
+          </div>
+          <div
+            className={`fpkm-nav-item ${view === 'appLogs' ? 'fpkm-nav-item-active' : ''}`}
+            onClick={() => {
+              setLogsApp('');
+              setView('appLogs');
+              setKeyword('');
+            }}
+          >
+            <IconFolderOpen />
+            应用日志
+          </div>
+          <div
             className={`fpkm-nav-item ${settingsVisible ? 'fpkm-nav-item-active' : ''}`}
             onClick={() => {
               setSettingsTab('sources');
@@ -790,9 +864,28 @@ export default function App() {
         </nav>
       </aside>
 
+      {/* 窄屏：抽屉遮罩，点击关闭侧栏 */}
+      {shellNarrow ? (
+        <div
+          className={'fpkm-side-mask' + (sideOpen ? ' fpkm-side-mask-open' : '')}
+          onClick={() => setSideOpen(false)}
+        />
+      ) : null}
+
       {/* ================= 主区域 ================= */}
       <div className="fpkm-main">
         <header className="fpkm-top">
+          <Tooltip content={sideOpen ? '收起侧边栏' : '展开侧边栏'}>
+            <Button
+              className="fpkm-icon-btn fpkm-side-toggle"
+              icon={<IconMenu />}
+              theme="borderless"
+              type="tertiary"
+              aria-label={sideOpen ? '收起侧边栏' : '展开侧边栏'}
+              onClick={() => setSideOpen((v) => !v)}
+            />
+          </Tooltip>
+
           <Input
             className="fpkm-top-search"
             prefix={<IconSearch />}
@@ -978,6 +1071,10 @@ export default function App() {
               onInstall={(id) => doStoreInstall({ id, name: '' })}
               onOpenApp={onOpenApp}
               onOpenSettings={openSettingsByName}
+              onOpenLogs={(name) => {
+                setLogsApp(name);
+                setView('appLogs');
+              }}
             />
           ) : null}
 
@@ -1021,6 +1118,29 @@ export default function App() {
               ) : null}
               {renderInstalled(onOpenApp)}
             </>
+          ) : null}
+
+          {view === 'fpkmLogs' ? (
+            <AppLogsPage
+              mode="fpkm"
+              apps={apps}
+              onBack={() => {
+                setView('home');
+                setKeyword('');
+              }}
+            />
+          ) : null}
+
+          {view === 'appLogs' ? (
+            <AppLogsPage
+              mode="app"
+              apps={apps}
+              initialApp={logsApp}
+              onBack={() => {
+                setView('home');
+                setKeyword('');
+              }}
+            />
           ) : null}
         </div>
       </div>

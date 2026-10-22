@@ -24,6 +24,7 @@ import {
 import type { FSEntry, FSListResult } from '../api/types';
 import { fsList } from '../api/client';
 import { formatSize, formatTime } from '../utils/format';
+import { useViewport, fitPopupWidth } from '../hooks/useViewport';
 
 interface Props {
   visible: boolean;
@@ -41,6 +42,9 @@ export default function FileBrowser({ visible, onCancel, onPick }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [manual, setManual] = useState('');
+
+  // 侧滑面板由 portal 挂到 body，固定 860px 在手机上会溢出屏幕，按视口收敛宽度。
+  const vp = useViewport();
 
   const load = useCallback(async (target?: string) => {
     setLoading(true);
@@ -94,18 +98,24 @@ export default function FileBrowser({ visible, onCancel, onPick }: Props) {
     {
       title: '大小',
       dataIndex: 'size',
-      width: 110,
+      width: vp.narrow ? 72 : 110,
       render: (_: unknown, row: FSEntry) => (row.isDir ? '-' : formatSize(row.size)),
     },
-    {
-      title: '修改时间',
-      dataIndex: 'mtime',
-      width: 170,
-      render: (_: unknown, row: FSEntry) => (row.mtime ? formatTime(row.mtime) : '-'),
-    },
+    // 手机竖屏可用宽度只有 ~330px：固定列宽会把表格挤出侧滑面板，
+    // 因此窄屏隐藏次要的「修改时间」列并收窄其余列，宽屏保持原样。
+    ...(vp.narrow
+      ? []
+      : [
+          {
+            title: '修改时间',
+            dataIndex: 'mtime',
+            width: 170,
+            render: (_: unknown, row: FSEntry) => (row.mtime ? formatTime(row.mtime) : '-'),
+          },
+        ]),
     {
       title: '操作',
-      width: 100,
+      width: vp.narrow ? 64 : 100,
       render: (_: unknown, row: FSEntry) => (
         <Button
           size="small"
@@ -127,8 +137,8 @@ export default function FileBrowser({ visible, onCancel, onPick }: Props) {
       title="从服务器文件安装"
       visible={visible}
       onCancel={onCancel}
-      width={860}
-      bodyStyle={{ padding: '16px 20px' }}
+      width={vp.narrow ? vp.width : fitPopupWidth(860, vp)}
+      bodyStyle={vp.narrow ? { padding: '14px 14px 18px' } : { padding: '16px 20px' }}
     >
       <Space vertical align="start" style={{ width: '100%' }} spacing={12}>
         <Banner
@@ -189,7 +199,7 @@ export default function FileBrowser({ visible, onCancel, onPick }: Props) {
               if (manual.trim().toLowerCase().endsWith('.fpk')) onPick(manual.trim());
               else load(manual.trim());
             }}
-            style={{ width: 520 }}
+            style={vp.narrow ? { flex: 1, minWidth: 0 } : { width: 520 }}
           />
           <Button
             onClick={() => {

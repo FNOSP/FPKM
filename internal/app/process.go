@@ -40,7 +40,8 @@ func (pm *ProcessManager) Start(entry *EntryInfo, env EnvMap) error {
 
 	os.MkdirAll(filepath.Dir(pm.logFile), 0755)
 
-	logF, err := os.OpenFile(pm.logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	// 应用子进程输出统一经时间戳写入器落到 logs/app.log
+	logF, err := openAppLog(pm.logFile)
 	if err != nil {
 		return fmt.Errorf("打开日志文件失败: %w", err)
 	}
@@ -63,7 +64,7 @@ func (pm *ProcessManager) Start(entry *EntryInfo, env EnvMap) error {
 		fullPreCmd := preCmd.Command + " " + strings.Join(preCmd.Args, " ")
 		logger.Info("执行预启动命令: %s", fullPreCmd)
 
-		preLog, err := os.OpenFile(pm.logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		preLog, err := openAppLog(pm.logFile)
 		if err != nil {
 			logger.Warn("打开预启动命令日志失败: %v", err)
 			continue
@@ -138,7 +139,7 @@ func (pm *ProcessManager) Start(entry *EntryInfo, env EnvMap) error {
 		extraCmd := extra.Command + " " + strings.Join(extra.Args, " ")
 		logger.Info("启动附加进程: %s", extraCmd)
 
-		extraLog, err := os.OpenFile(pm.logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		extraLog, err := openAppLog(pm.logFile)
 		if err != nil {
 			logger.Warn("打开附加进程日志失败: %v", err)
 			continue
@@ -186,8 +187,8 @@ func (pm *ProcessManager) startBashScript(entry *EntryInfo, env EnvMap) error {
 	cmd.Env = appEnviron(env)
 	setProcessGroup(cmd)
 
-	// 脚本的输出重定向到日志文件
-	logF, err := os.OpenFile(pm.logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	// 脚本的输出重定向到日志文件（每行带发生时间）
+	logF, err := openAppLog(pm.logFile)
 	if err == nil {
 		cmd.Stdout = logF
 		cmd.Stderr = logF
@@ -348,8 +349,9 @@ func (pm *ProcessManager) startStaticServer(entry *EntryInfo, env EnvMap) error 
 	}
 
 	cmd := exec.Command(os.Args[0], "serve", "--dir", staticDir, "--port", port)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// 静态服务器的输出同样补上发生时间，和控制台日志格式保持一致
+	cmd.Stdout = logger.NewStampWriter(os.Stdout)
+	cmd.Stderr = logger.NewStampWriter(os.Stderr)
 	setProcessGroup(cmd)
 
 	if err := cmd.Start(); err != nil {

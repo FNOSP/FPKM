@@ -48,6 +48,12 @@ const STORE_ICON: DesktopIcon = {
 const DEFAULT_W = 960;
 const DEFAULT_H = 620;
 
+/** 任务栏（Dock）高度兜底值：与 desktop.css 的 .fpkm-dock height 一致（76px） */
+const DOCK_FALLBACK_H = 76;
+
+/** 窗口可用区域的最小高度：极矮窗口下不把可用区算成 0 或负数 */
+const MIN_USABLE_H = 200;
+
 /**
  * 应用商店窗口的初始尺寸（目标是应用列表稳排 3 列）。
  *
@@ -94,28 +100,45 @@ export default function Desktop({
   const dock = useDock();
 
   /**
-   * 可拖放区域 = **整个桌面**（含任务栏所占的底部区域）。
+   * 窗口可用区域 = 整个桌面**减去任务栏（Dock）占用的底部高度**。
    *
-   * 之前用 .fpkm-desktop-area（inset 0 0 76px 0）作为 bounds，
-   * 结果是窗口永远拖不到任务栏上方，且该容器 overflow:hidden
-   * 会把窗口超出部分裁掉。
+   * 历史与取舍：
+   *   - 最初用 .fpkm-desktop-area（inset 0 0 76px 0）当 bounds，但该容器
+   *     overflow:hidden 会把窗口超出部分裁掉；
+   *   - 后来改成"bounds = 整个桌面"，让窗口可以盖到任务栏位置。任务栏
+   *     z-index（9000）高于窗口层，表面上没问题，但窗口底部约一栏高的区域
+   *     永远压在任务栏下面：内容滚到底也翻不出来，表现为「手机窄屏 /
+   *     小窗口下，任务栏把日志正文的最后几行盖住」。
    *
    * 现在的约定：
-   *   - 窗口层与任务栏是 .fpkm-desktop 的同级子元素；
-   *   - bounds 取整个桌面的尺寸，窗口可以盖到任务栏位置；
-   *   - 任务栏 z-index 固定高于窗口层，保证它**永远在最顶层**。
+   *   - 窗口层与任务栏仍是 .fpkm-desktop 的同级子元素（不受父级 overflow 裁剪）；
+   *   - bounds 高度 = 桌面高度 − 任务栏实测高度，最大化 / 贴底的窗口不会
+   *     再伸到任务栏下面；
+   *   - 任务栏 z-index 依旧高于窗口层，保证它**永远在最顶层**。
    */
   const measure = useCallback(() => {
     const el = rootRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    setBounds({ w: Math.round(r.width), h: Math.round(r.height) });
+    // 任务栏高度按 DOM 实测：CSS 里固定 76px，将来窄屏样式若调整，
+    // 这里跟着变，不会出现"算出来的可用区与实际不一致"。
+    const dock = el.querySelector('.fpkm-dock') as HTMLElement | null;
+    const dockH = dock ? Math.round(dock.getBoundingClientRect().height) : DOCK_FALLBACK_H;
+    setBounds({
+      w: Math.round(r.width),
+      h: Math.max(MIN_USABLE_H, Math.round(r.height - dockH)),
+    });
   }, []);
 
   useEffect(() => {
     measure();
     window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
+    // 部分 WebView / 手机横竖屏切换只触发 orientationchange（不触发 resize），补一档
+    window.addEventListener('orientationchange', measure);
+    return () => {
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('orientationchange', measure);
+    };
   }, [measure]);
 
   /** 系统状态轮询（小组件）：进桌面后每 5 秒刷新一次 */
@@ -482,8 +505,10 @@ export default function Desktop({
       {/* 子窗口层：与任务栏同级（不在 .fpkm-desktop-area 内）。
           原因：
             1. 那个容器 overflow:hidden，会把拖到底部的窗口裁掉；
-            2. 它的高度不含任务栏，bounds 因此永远到不了任务栏位置。
-          任务栏的 z-index 高于本层，所以窗口不会盖住任务栏。 */}
+            2. 本层铺满桌面（inset:0），窗口位置由 bounds 约束 ——
+               bounds 已扣除任务栏高度，因此窗口（含最大化）不会伸到
+               任务栏下面，任务栏也就不会盖住窗口内容。
+          任务栏的 z-index 高于本层，始终在最顶层。 */}
       <div className="fpkm-window-layer">
         {windows.map((w) => (
           <AppWindowFrame

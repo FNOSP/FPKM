@@ -128,7 +128,7 @@ func TestTailLogHint(t *testing.T) {
 	p := filepath.Join(dir, "app.log")
 	content := ""
 	for i := 0; i < 5000; i++ {
-		content += "line-" + itoa(i) + "\n"
+		content += "line-" + itoaTest(i) + "\n"
 	}
 	content += "http: listen tcp :7863: bind: address already in use\n"
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
@@ -149,7 +149,7 @@ func TestTailLogHint(t *testing.T) {
 	}
 }
 
-func itoa(i int) string {
+func itoaTest(i int) string {
 	if i == 0 {
 		return "0"
 	}

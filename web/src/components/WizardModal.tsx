@@ -16,6 +16,7 @@ import {
   Toast,
 } from '@douyinfe/semi-ui';
 import type { WizardItem, WizardResponse, WizardStep } from '../api/types';
+import { useViewport, fitPopupWidth } from '../hooks/useViewport';
 
 const { Text } = Typography;
 
@@ -86,6 +87,9 @@ export default function WizardModal({
   const [stepIndex, setStepIndex] = useState(0);
   const [values, setValues] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // 向导弹窗由 portal 挂到 body，固定 640px 在手机上会溢出屏幕，按视口收敛宽度。
+  const vp = useViewport();
 
   // 打开时用默认值初始化
   useEffect(() => {
@@ -326,7 +330,8 @@ export default function WizardModal({
       visible={visible}
       onCancel={submitting ? undefined : onCancel}
       footer={footer}
-      width={640}
+      width={fitPopupWidth(640, vp)}
+      bodyStyle={vp.narrow ? { padding: '14px 14px 18px' } : undefined}
       maskClosable={false}
       closable={!submitting}
     >

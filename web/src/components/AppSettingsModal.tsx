@@ -4,6 +4,7 @@ import type { AppView } from '../api/types';
 import { getAccessSetting, setAccessSetting } from '../api/client';
 import { iconURL } from '../api/client';
 import { buildAccessURL, kindLabel } from '../utils/format';
+import { useViewport, fitPopupWidth } from '../hooks/useViewport';
 
 type Mode = '' | 'port' | 'gateway' | 'cgi';
 
@@ -41,6 +42,10 @@ export default function AppSettingsModal({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  // 弹窗由 portal 挂到 body，不在 .fpkm-shell 内，CSS 断点管不到：
+  // 固定 640px 在手机上会溢出屏幕，这里按视口收敛宽度。
+  const vp = useViewport();
 
   // 打开时读取当前设置
   useEffect(() => {
@@ -129,8 +134,8 @@ export default function AppSettingsModal({
       okText="保存"
       cancelText="取消"
       confirmLoading={saving}
-      width={640}
-      bodyStyle={{ padding: '8px 24px 8px' }}
+      width={fitPopupWidth(640, vp)}
+      bodyStyle={vp.narrow ? { padding: '8px 14px 8px' } : { padding: '8px 24px 8px' }}
     >
       {/* 应用头部：图标 + 名称 + 当前类型 */}
       <div className="fpkm-set-head">
@@ -181,7 +186,7 @@ export default function AppSettingsModal({
                 placeholder="如 16601"
                 value={port}
                 onChange={setPort}
-                style={{ width: 200 }}
+                style={{ width: vp.narrow ? '100%' : 200 }}
               />
               <div className="fpkm-set-tip">
                 填写应用自己的服务端口。例如填 16601，打开地址就是
@@ -197,7 +202,7 @@ export default function AppSettingsModal({
                 placeholder="/"
                 value={path}
                 onChange={setPath}
-                style={{ width: 240 }}
+                style={{ width: vp.narrow ? '100%' : 240 }}
               />
               <div className="fpkm-set-tip">
                 {mode === 'port'

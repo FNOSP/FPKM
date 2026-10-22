@@ -132,14 +132,11 @@ func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleAppAction 处理 POST /api/apps/{name}/{action}
-// 支持 action: start | stop | uninstall | upgrade
+// handleAppAction 处理 /api/apps/{name}/{action}
+//
+// POST 支持 action: start | stop | uninstall | upgrade
+// GET  支持 action: log（查看所有日志，纯读取，不占用任务锁）
 func (s *Server) handleAppAction(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeJSONError(w, http.StatusMethodNotAllowed, "仅支持 POST")
-		return
-	}
-
 	rest := strings.TrimPrefix(r.URL.Path, "/api/apps/")
 	parts := strings.Split(strings.Trim(rest, "/"), "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
@@ -153,6 +150,17 @@ func (s *Server) handleAppAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	action := parts[1]
+
+	// 查看所有日志：只读接口，与 start/stop 等写操作分开处理
+	if r.Method == http.MethodGet && action == "log" {
+		s.handleAppLog(w, r, name)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "仅支持 POST")
+		return
+	}
 
 	// 允许 upgrade 通过查询参数指定包路径
 	pkgPathQuery := r.URL.Query().Get("path")

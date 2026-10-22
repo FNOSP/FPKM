@@ -153,15 +153,38 @@ func DetectEntryWithEnv(targetDir string, env EnvMap) (*EntryInfo, error) {
 			} else {
 				logger.Debug("无法从 bash 脚本提取启动命令，回退到执行 bash 脚本")
 			}
-			// 无法提取启动命令或文件不存在，回退到执行 bash 脚本
+			// 无法提取启动命令或文件不存在，回退到执行 shell 脚本
+			// （bash 优先，Android 等只有 POSIX sh 的环境回退 sh）
 			return &EntryInfo{
 				Type:    EntryBashScript,
-				Command: "bash",
+				Command: shellPath(),
 				Args:    []string{cmdMain, "start"},
 				WorkDir: targetDir,
 			}, nil
 		}
-		return parseCmdMain(cmdMain, appDir, targetDir)
+		entry, err := parseCmdMain(cmdMain, appDir, targetDir)
+		if err == nil {
+			return entry, nil
+		}
+
+		// 解析脚本提取二进制失败时，回退为「直接执行脚本」。
+		//
+		// 真实故障：云抽奖 cloud-lottery 1.0.0 的 cmd/main 有 case 分发，
+		// 但既没有函数定义也没有 source，因此不会被 looksLikeDispatcherScript
+		// 判定为分发脚本，转而走 parseCmdMain；而它的启动命令是
+		// `nohup python3 "$APP_ENTRY"`，脚本里没有任何可提取的二进制路径，
+		// 最终报「探测入口失败: 无法从cmd/main中提取二进制路径」，应用完全无法启动。
+		//
+		// 脚本模式下该脚本自身负责环境准备与后台启动（含 start/stop 分支），
+		// 直接交给 shell 执行才是正确语义；真正的缺失依赖（如 python3）会由
+		// 脚本或运行时诊断给出明确原因。
+		logger.Warn("无法从 cmd/main 提取二进制路径（%v），回退为执行脚本: %s start", err, cmdMain)
+		return &EntryInfo{
+			Type:    EntryBashScript,
+			Command: shellPath(),
+			Args:    []string{cmdMain, "start"},
+			WorkDir: targetDir,
+		}, nil
 	}
 
 	// 1. 检测 Docker 应用

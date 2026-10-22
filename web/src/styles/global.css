@@ -447,7 +447,8 @@ body {
 }
 
 .fpkm-nav {
-  padding: 6px 10px 14px;
+  /* 底部预留安全区（Android 手势条 / iPhone Home 指示条） */
+  padding: 6px 10px calc(14px + env(safe-area-inset-bottom, 0px));
   flex: 1;
 }
 
@@ -552,6 +553,135 @@ body {
   flex: 1;
   overflow-y: auto;
   padding: 20px 22px 40px;
+}
+
+/* ================= 窄屏（手机）适配 + 侧栏收缩 =================
+
+   商店外壳同时服务两种容器：
+     1. 桌面浏览器 / 桌面窗口（宽）→ 侧栏常驻，可用顶栏按钮收起；
+     2. 手机 / 窄窗口（< 768px）→ 侧栏改为覆盖式抽屉：默认收起，
+        点顶栏按钮从左侧滑出，点遮罩或任意导航项收起。
+   由 JS 依据外壳**实际宽度**加 .fpkm-shell-narrow / .fpkm-shell-side-open，
+   因此对"窄窗口"和"小视口"都成立（不依赖视口媒体查询）。
+   ------------------------------------------------------------ */
+
+.fpkm-shell {
+  position: relative;
+}
+
+.fpkm-side {
+  transition: width 0.18s ease, transform 0.2s ease;
+}
+
+/* 顶栏最左的收缩按钮 */
+.fpkm-side-toggle.semi-button {
+  flex-shrink: 0;
+}
+
+/* 宽屏收起：侧栏宽度归零，内容区占满 */
+.fpkm-shell:not(.fpkm-shell-narrow):not(.fpkm-shell-side-open) .fpkm-side {
+  width: 0;
+  border-right-width: 0;
+  overflow: hidden;
+}
+
+/* 窄屏：侧栏改为浮层抽屉，覆盖在内容之上 */
+.fpkm-shell-narrow .fpkm-side {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 30;
+  width: 76%;
+  max-width: 300px;
+  min-width: 220px;
+  border-right: 1px solid var(--semi-color-border);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.22);
+  transform: translateX(-100%);
+}
+
+.fpkm-shell-narrow.fpkm-shell-side-open .fpkm-side {
+  transform: translateX(0);
+}
+
+/* 窄屏抽屉铺满整个外壳高度，底部会被悬浮任务栏（Dock，高 76px）盖住。
+   这里给导航列表预留出 Dock 的高度 + 安全区，保证最后一项（如「应用日志」）
+   能滚到 / 停在 Dock 之上，不被遮挡。 */
+.fpkm-shell-narrow .fpkm-nav {
+  padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+}
+
+/* 抽屉遮罩：只在窄屏渲染，点它关闭侧栏 */
+.fpkm-side-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  background: rgba(15, 23, 42, 0.36);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.fpkm-side-mask-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 窄屏顶栏：第一行「收缩按钮 + 操作图标」，第二行整行搜索框 */
+.fpkm-shell-narrow .fpkm-top {
+  height: auto;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  gap: 8px;
+  row-gap: 10px;
+}
+
+.fpkm-shell-narrow .fpkm-side-toggle {
+  order: 1;
+}
+
+.fpkm-shell-narrow .fpkm-top-right {
+  order: 1;
+  margin-left: auto;
+  gap: 2px;
+}
+
+.fpkm-shell-narrow .fpkm-top-search {
+  order: 2;
+  flex: 1 1 100%;
+  max-width: none;
+}
+
+/* 窄屏主体：收窄内边距，卡片列表改为单列 */
+.fpkm-shell-narrow .fpkm-body {
+  padding: 14px 12px 32px;
+}
+
+.fpkm-shell-narrow .fpkm-grid {
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.fpkm-shell-narrow .fpkm-banner {
+  padding: 22px 18px;
+  min-height: 0;
+}
+
+.fpkm-shell-narrow .fpkm-banner-title {
+  font-size: 21px;
+}
+
+/* 详情页：窄屏下头部与操作区允许换行 */
+.fpkm-shell-narrow .fpkm-detail-head {
+  flex-wrap: wrap;
+}
+
+.fpkm-shell-narrow .fpkm-detail-headmain {
+  min-width: 0;
+}
+
+.fpkm-shell-narrow .fpkm-detail-actions-main {
+  flex-wrap: wrap;
 }
 
 /* ---------- 首页横幅 ---------- */
@@ -1498,5 +1628,294 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12.5px;
   color: var(--semi-color-text-0);
+  word-break: break-all;
+}
+
+
+/* ---------- 查看所有日志（Web / Android / Windows 三端共用） ---------- */
+
+.fpkm-logs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.fpkm-logs-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* 返回按钮在有侧栏收起按钮时不必再占一行宽度 */
+.fpkm-logs-back.semi-button {
+  padding-left: 0;
+  padding-right: 6px;
+}
+
+.fpkm-logs-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fpkm-logs-title-main {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+  line-height: 1.4;
+}
+
+.fpkm-logs-title-sub {
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+}
+
+/* 工具栏：窄屏自动换行，控件尽量占满整行 */
+.fpkm-logs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--semi-color-border);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.fpkm-logs-app {
+  min-width: 220px;
+  max-width: 320px;
+}
+
+.fpkm-logs-tail {
+  width: 132px;
+}
+
+.fpkm-logs-search {
+  flex: 1 1 200px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--semi-color-border);
+  border-radius: 8px;
+  background: var(--semi-color-fill-0);
+  color: var(--semi-color-text-2);
+}
+
+.fpkm-logs-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--semi-color-text-0);
+}
+
+.fpkm-logs-auto {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--semi-color-text-1);
+  white-space: nowrap;
+}
+
+.fpkm-logs-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 16px;
+}
+
+.fpkm-logs-dir {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  word-break: break-all;
+}
+
+/* 时间口径说明：正文行首时间已换算为访问者本地时区 */
+.fpkm-logs-tz {
+  white-space: nowrap;
+}
+
+/* 展示正文前的「日志文件」切换：文件少用标签，文件多用下拉框 */
+.fpkm-logs-fileswitch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--semi-color-border);
+  border-radius: 10px;
+  background: var(--semi-color-fill-0);
+  min-width: 0;
+}
+
+.fpkm-logs-fileswitch-label {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  white-space: nowrap;
+}
+
+.fpkm-logs-filetabs {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.fpkm-logs-filetabs .semi-radioGroup-buttonRadio {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.fpkm-logs-fileselect {
+  flex: 1 1 220px;
+  min-width: 0;
+  max-width: 420px;
+}
+
+.fpkm-logs-empty {
+  padding: 24px 0;
+}
+
+.fpkm-logs-banner {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(255, 77, 79, 0.08);
+}
+
+.fpkm-logs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.fpkm-logs-file {
+  border: 1px solid var(--semi-color-border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+  min-width: 0;
+}
+
+/* 文件头：左侧「文件名 + 标签 + 时间」纵向两行，右侧操作按钮。
+   相比原来的单行挤压布局，文件名更醒目、操作区固定不换行。 */
+.fpkm-logs-file-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  background: var(--semi-color-fill-0);
+}
+
+/* 文件名与时间的左侧主体：上下两行，宽度可压缩 */
+.fpkm-logs-file-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.fpkm-logs-file-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* 文件名：显式高对比深色（此前只有字重、继承浅色，浅灰底上几乎看不清） */
+.fpkm-logs-file-title {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--semi-color-text-0);
+  word-break: break-all;
+}
+
+.fpkm-logs-file-time {
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+}
+
+.fpkm-logs-file-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* 日志正文：深色终端底；宽屏保持 pre（横向滚动），窄屏改为自动换行 */
+.fpkm-logs-content {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 420px;
+  overflow: auto;
+  background: #1c1f23;
+  color: #d4d4d4;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 窄屏（手机）：控件整行排布，日志正文自动换行且限制高度 */
+.fpkm-shell-narrow .fpkm-logs-toolbar {
+  padding: 8px;
+  gap: 6px;
+}
+
+.fpkm-shell-narrow .fpkm-logs-app,
+.fpkm-shell-narrow .fpkm-logs-tail {
+  flex: 1 1 100%;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+
+.fpkm-shell-narrow .fpkm-logs-search {
+  flex: 1 1 100%;
+}
+
+.fpkm-shell-narrow .fpkm-logs-file-head {
+  align-items: flex-start;
+}
+
+/* 窄屏：切换控件整行排布，标签横向可滚动，下拉框占满整行 */
+.fpkm-shell-narrow .fpkm-logs-fileswitch {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.fpkm-shell-narrow .fpkm-logs-filetabs {
+  width: 100%;
+}
+
+.fpkm-shell-narrow .fpkm-logs-fileselect {
+  flex: 1 1 100%;
+  width: 100%;
+  max-width: none;
+}
+
+.fpkm-shell-narrow .fpkm-logs-tz {
+  white-space: normal;
+}
+
+.fpkm-shell-narrow .fpkm-logs-content {
+  max-height: 300px;
+  white-space: pre-wrap;
   word-break: break-all;
 }

@@ -12,6 +12,7 @@ import {
 import type { InspectResult } from '../api/types';
 import { fsInspect } from '../api/client';
 import { formatSize, stripHtml } from '../utils/format';
+import { useViewport, fitPopupWidth } from '../hooks/useViewport';
 
 interface Props {
   visible: boolean;
@@ -31,6 +32,9 @@ export default function InstallConfirm({ visible, packagePath, onCancel, onConfi
   const [info, setInfo] = useState<InspectResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // 弹窗由 portal 挂到 body，固定 640px 在手机上会溢出屏幕，按视口收敛宽度。
+  const vp = useViewport();
 
   useEffect(() => {
     if (!visible || !packagePath) {
@@ -106,7 +110,8 @@ export default function InstallConfirm({ visible, packagePath, onCancel, onConfi
           </Button>
         </Space>
       }
-      width={640}
+      width={fitPopupWidth(640, vp)}
+      bodyStyle={vp.narrow ? { padding: '14px 14px 18px' } : undefined}
       maskClosable
     >
       {loading ? (
@@ -132,7 +137,9 @@ export default function InstallConfirm({ visible, packagePath, onCancel, onConfi
             ) : null}
 
             <Descriptions
-              row
+              // 宽屏一行铺开多组；窄屏改为每行一条，避免长路径/版本号被挤成竖排
+              row={!vp.narrow}
+              column={vp.narrow ? 1 : 3}
               size="small"
               data={[
                 { key: '应用名', value: pkg.appname },

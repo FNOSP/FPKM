@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // Config 全局配置
@@ -138,20 +139,25 @@ func (c *Config) AppSocketPath(appname, socketName string) string {
 
 // resolveBaseDir 决定数据根目录。
 //
-// 优先使用「可执行文件所在目录/data」：
+// 优先级：
 //
-//	/opt/fpkm/dist/fpkm  →  /opt/fpkm/dist/data
+//  1. 环境变量 FPKM_DATA_DIR（显式指定，Android 沙箱下由壳应用注入应用私有目录）
+//  2. 「可执行文件所在目录/data」：/opt/fpkm/dist/fpkm → /opt/fpkm/dist/data
+//  3. 回退 $HOME/.local/fpk（或 Windows %USERPROFILE%\.fpk）
 //
-// 为什么改到这里：
+// 关于第 2 项：旧方案用 $HOME/.local/fpk，数据跟着「运行时的 HOME」走，
+// 而 HOME 会随用户改变（sudo、systemd、docker、不同的登录用户），
+// 于是出现"某个用户装的应用，换个身份启动就全部消失"的问题。
+// 数据放在程序旁边后，同一份二进制必然对应同一份数据，不会再错位。
 //
-//	旧方案用 $HOME/.local/fpk。数据跟着「运行时的 HOME」走，
-//	而 HOME 会随用户改变（sudo、systemd、docker、不同的登录用户），
-//	于是出现"某个用户装的应用，换个身份启动就全部消失"的问题。
-//	数据放在程序旁边后，同一份二进制必然对应同一份数据，不会再错位。
-//
-// 回退：可执行文件所在目录不可写时（例如 /usr/local/bin 只读），
-// 退回 $HOME/.local/fpk，保证程序仍能启动。
+// 回退：可执行文件所在目录不可写时（例如 /usr/local/bin 只读，
+// 或 Android 的 native 库目录挂载为只读），退回 $HOME/.local/fpk。
 func resolveBaseDir() string {
+	if dir := strings.TrimSpace(os.Getenv("FPKM_DATA_DIR")); dir != "" {
+		if dirUsable(dir) {
+			return dir
+		}
+	}
 	if exe, err := os.Executable(); err == nil {
 		// 解析符号链接，避免通过软链接启动时把 data 建到软链接所在目录
 		if resolved, rerr := filepath.EvalSymlinks(exe); rerr == nil {

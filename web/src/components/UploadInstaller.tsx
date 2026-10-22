@@ -11,6 +11,7 @@ import {
 import { IconUpload, IconFile, IconClose } from '@douyinfe/semi-icons';
 import { uploadAndInstall, type UploadHandle } from '../api/client';
 import { formatSize } from '../utils/format';
+import { useViewport, fitPopupWidth } from '../hooks/useViewport';
 
 interface Props {
   visible: boolean;
@@ -36,6 +37,9 @@ export default function UploadInstaller({ visible, onCancel, onTask }: Props) {
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const handleRef = useRef<UploadHandle | null>(null);
+
+  // 侧滑面板由 portal 挂到 body，固定 680px 在手机上会溢出屏幕，按视口收敛宽度。
+  const vp = useViewport();
 
   const reset = () => {
     setFile(null);
@@ -97,8 +101,8 @@ export default function UploadInstaller({ visible, onCancel, onTask }: Props) {
       title="上传安装包安装"
       visible={visible}
       onCancel={close}
-      width={680}
-      bodyStyle={{ padding: '16px 20px' }}
+      width={vp.narrow ? vp.width : fitPopupWidth(680, vp)}
+      bodyStyle={vp.narrow ? { padding: '14px 14px 18px' } : { padding: '16px 20px' }}
     >
       <Space vertical align="start" spacing={14} style={{ width: '100%' }}>
         <Banner
