@@ -1807,23 +1807,37 @@ func normalizeLineEndings(s string) string {
 // isScriptFile 判断文件是否是脚本文件（需要重映射路径）
 // 包括：无扩展名的文件（如 cmd/main, install_callback）、.sh 文件
 func isScriptFile(name string) bool {
-	// .sh 文件
-	if strings.HasSuffix(name, ".sh") {
-		return true
+	lower := strings.ToLower(name)
+
+	// 明确的脚本扩展名（都是纯文本，重映射路径安全）
+	//
+	// 只列真正的脚本语言；归档、压缩、图片、数据库等一律不在此列，
+	// 它们走下面的「有扩展名即跳过」分支。
+	for _, ext := range []string{
+		".sh", ".bash", ".zsh", ".ksh", ".ash",
+		".py", ".pl", ".rb", ".lua", ".php", ".tcl",
+	} {
+		if strings.HasSuffix(lower, ext) {
+			return true
+		}
 	}
-	// 无扩展名的文件（如 main, install_callback, uninstall_callback）
-	// 跳过常见的二进制文件扩展名
-	if strings.HasSuffix(name, ".cgi") || strings.HasSuffix(name, ".bin") ||
-		strings.HasSuffix(name, ".exe") || strings.HasSuffix(name, ".so") ||
-		strings.HasSuffix(name, ".pyc") || strings.HasSuffix(name, ".json") ||
-		strings.HasSuffix(name, ".png") || strings.HasSuffix(name, ".jpg") ||
-		strings.HasSuffix(name, ".ico") || strings.HasSuffix(name, ".db") ||
-		strings.HasSuffix(name, ".toml") || strings.HasSuffix(name, ".yaml") ||
-		strings.HasSuffix(name, ".yml") || strings.HasSuffix(name, ".html") ||
-		strings.HasSuffix(name, ".css") || strings.HasSuffix(name, ".js") {
+
+	// 有扩展名的一律不当作 shell 脚本处理。
+	//
+	// 这里曾经是「未知扩展名也当脚本」，导致真实故障：
+	// Agent2API 3.1.0 的 target/server/agent2api.tar.gz 被误判为脚本，
+	// 进入 remapFile 后先被 isBinaryContent 误判为文本（gzip 压缩数据的
+	// 控制字符占比约 28%，低于当时 30% 的阈值），随后 normalizeLineEndings
+	// 把二进制里的 119 个 CRLF 折叠成 LF，内层包被破坏 119 字节，
+	// install_callback 执行 tar -xzf 时报
+	//   gzip: invalid compressed data--format violated
+	// 最终解出的服务端二进制只有 224KB（应为 13.7MB），应用装得上但起不来。
+	//
+	// 归档/压缩/二进制文件一律不碰；无扩展名的（main、install_callback
+	// 等）仍然按脚本处理。
+	if strings.Contains(lower, ".") {
 		return false
 	}
-	// 无扩展名或未知扩展名，当作脚本处理
 	return true
 }
 
@@ -1833,20 +1847,33 @@ func isBinaryContent(data []byte) bool {
 	if len(data) == 0 {
 		return false
 	}
-	// 检查前 1024 字节中的不可打印字符比例
+	// 检查前 1024 字节
 	checkLen := len(data)
 	if checkLen > 1024 {
 		checkLen = 1024
 	}
+
+	// 强信号：文本文件不会包含 NUL 字节。
+	//
+	// gzip/zlib 等压缩数据在头部就带 NUL（gzip 头第 4~8 字节是 mtime，
+	// 常为 0），因此这一条能可靠拦住压缩包，不受压缩率影响。
+	// 仅靠"控制字符比例"会漏判：压缩数据的控制字符占比常在 25%~30%，
+	// 与阈值擦边（真实案例见 isScriptFile 注释）。
+	for i := 0; i < checkLen; i++ {
+		if data[i] == 0 {
+			return true
+		}
+	}
+
 	nonPrintable := 0
 	for i := 0; i < checkLen; i++ {
 		c := data[i]
 		// 允许的字符：可打印 ASCII、制表符、换行符、回车符
-		if c == 0 || (c < 9) || (c > 13 && c < 32) {
+		if (c < 9) || (c > 13 && c < 32) {
 			nonPrintable++
 		}
 	}
-	// 如果不可打印字符超过 30%，认为是二进制文件
+	// 不可打印字符超过 30% 视为二进制
 	return nonPrintable*100/checkLen > 30
 }
 
